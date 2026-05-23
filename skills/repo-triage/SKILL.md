@@ -1,14 +1,14 @@
 ---
 name: repo-triage
 description: Review a software repository, inspect project state, read issues/milestones, identify blockers, and recommend next implementation steps.
-version: 0.1.0
+version: 0.1.1
 status: draft
 ---
 
 # Repo Triage Skill
 
 ## Purpose
-Examine a new or active software repository to map its structure, evaluate current development status, identify blocks or architectural anomalies, and propose the next 3 high-impact development actions.
+Examine a new or active software repository to map its structure, evaluate current development status, identify blocks or architectural anomalies, and propose the top 3-5 high-impact development actions.
 
 ## Use When
 - Opening a repository for the first time in a session.
@@ -37,7 +37,7 @@ Examine a new or active software repository to map its structure, evaluate curre
     *   **Docs**: Outdated, missing, or cluttered manuals.
     *   **Tests & Automation**: Broken CI/CD, missing coverages.
 5.  **Identify Blockers**: Highlight any missing variables, broken dependencies, unauthenticated tokens, or vague requirements stopping progress.
-6.  **Formulate Recommendations**: Recommend exactly **three (3)** next actions, ordering them logically from dependencies first to downstream features last.
+6.  **Formulate Recommendations**: Recommend the **top 3-5** next actions, ordering them logically from dependencies first to downstream features last.
 
 ## Output Format
 Render a clean Markdown triage report:
@@ -72,7 +72,7 @@ Render a clean Markdown triage report:
 ## Rules
 - **NEVER** modify or edit source files during the triaging phase.
 - Do NOT run tests or build steps unless explicitly instructed to verify a bug.
-- Keep the recommendations strictly to exactly three (3) actions. Do not overwhelm the user.
+- Keep the recommendations strictly to the top 3-5 actions. Do not overwhelm the user.
 
 ## Global Skill Change Policy
 This is a shared, global skill. Do NOT add repo-specific details or credentials. Any modifications to this skill's behavior must be performed in a dedicated Pull Request within the `agent-skills` repository, requiring a version bump and an entry in `CHANGELOG.md`.

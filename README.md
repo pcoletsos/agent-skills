@@ -76,6 +76,16 @@ ln -s ~/repos/projects/agent-skills/skills/repo-triage .agents/skills/repo-triag
 
 ---
 
+## 🛡️ Validate skills
+
+To check skill structure, frontmatter, registry alignment, and required headings, run:
+
+```bash
+python tools/validate_skills.py
+```
+
+---
+
 ## 🛠 Starter Skills (v0.1.0)
 
 This repository launches with six essential starter skills. Each skill begins at version `0.1.0` in a `draft` status:
