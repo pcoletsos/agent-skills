@@ -1,103 +1,144 @@
 # Consuming Agent Skills
 
-This guide explains how to import and consume skills from the central `agent-skills` repository into your active development repositories. We support three integration modes (the **90/8/2 Model**): **Linked-Global**, **Local Overlay**, and **Forked-Local**.
+This guide explains how to import, configure, and consume skills from the central `agent-skills` repository into your active development repositories.
 
 ---
 
-## 🔗 1. Linked-Global Mode (90% of Use Cases)
+## 🎯 Recommended Consumption Model
 
-In this mode, the target repository points directly to a global skill folder via a filesystem symlink. This guarantees that any updates made to the central `agent-skills` repo are instantly available to the project.
+To keep our workflows highly structured and avoid custom configuration sprawl, we recommend the **90/8/2 Model**:
 
-### Structural Layout:
-```
-my-active-project/
-├── .agents/
-│   └── skills/
-│       └── repo-triage ───► (Symlink to: ~/repos/projects/agent-skills/skills/repo-triage)
-├── src/
-└── README.md
-```
+- **Linked-Global (90%)**: Use by default. Directly links standard skills without duplicating code.
+- **Overlay (8%)**: Use when the global skill is mostly correct but requires repository-specific boundaries or metadata (e.g. test frameworks, package names).
+- **Forked-Local (2%)**: Reserved strictly as a last resort exception when a project demands radically different agent behaviors or schemas.
 
-### ⚠️ IMPORTANT: Individual Symlinks Only
-Always symlink **individual skill folders**, never the parent `skills/` directory itself. 
-*   **Correct**: `ln -s ~/repos/projects/agent-skills/skills/repo-triage .agents/skills/repo-triage`
-*   **Incorrect**: `ln -s ~/repos/projects/agent-skills/skills .agents/skills`
+---
 
-Linking the parent directory exposes *all* skills to the agentic environment at once, causing massive context bloat and increasing the risk of false-positive prompt triggers.
+## 🏗️ Three Consumption Modes Explained
 
-### Setup Commands:
+### 1. Linked-Global
+*   **Definition**: A direct filesystem symlink pointing from your project's local config folder to a global skill folder.
+*   **Use Case**: Default behavior for reusable skills like `repo-triage`, `pr-review`, etc.
+*   **Setup**: Allows a project to dynamically receive all global updates instantly.
+
+### 2. Overlay
+*   **Definition**: A local repository extension configured alongside a symlinked global skill.
+*   **Use Case**: Used when a global skill's baseline procedure is correct, but the repository needs custom local parameters (e.g., target stack, linter configuration).
+
+### 3. Forked-Local
+*   **Definition**: A physical copy of the global skill folder placed directly in the repository's configuration path.
+*   **Use Case**: Used only when a repository has unique, custom behaviors or specialized orchestrations that can never be generalized.
+*   **Trade-off**: The skill will no longer receive any updates from the global repository.
+
+---
+
+## ⚠️ The Behavior of Symlinks
+
+When operating with Linked-Global or Overlay modes, remember these critical behaviors of filesystem symlinks (`ln -s`):
+
+1. **Editing a symlinked file/folder edits the global skill**: If an agent or human editor makes changes to a file inside the symlinked skill directory, those edits apply directly to the original files in your global `agent-skills` repository. Be careful not to pollute global skills with local context.
+2. **Deleting files inside a symlinked skill folder affects the global skill**: Deleting a file under the symlinked folder deletes the file from the global `agent-skills` repository.
+3. **Deleting the symlink itself does NOT delete the global skill**: You can safely delete the symbolic link file or symlinked directory representation from your child repository's filesystem without harming the global files.
+
+---
+
+## 🔌 Tool Paths & Configurations
+
+Depending on the agent or development environment you use, configure one of the following directories.
+
+### Global vs. Local Config Directories
+
+| Tool | Global Path (Home Directory) | Local Path (Repository Root) |
+| :--- | :--- | :--- |
+| **Codex / portable Agent Skills** | `~/.agents/skills/` | `<repo>/.agents/skills/` |
+| **Claude Code** | `~/.claude/skills/` | `<repo>/.claude/skills/` |
+| **Antigravity (Gemini)** | `~/.gemini/antigravity/skills/` | `<repo>/.agent/skills/` |
+| **GitHub Copilot-style skills** | *(N/A)* | `<repo>/.github/skills/` or `<repo>/.agents/skills/` |
+
+---
+
+## 🔗 Setup & Example Symlink Commands
+
+Always symlink **individual skill folders**, never the parent `skills/` folder. Symlinking the entire `skills/` directory exposes every skill at once, causing extreme context bloat and risk of prompt triggers.
+
+To link an individual skill (e.g., `repo-triage`), run:
+
 ```bash
-# Navigate to your target repository
-cd ~/repos/projects/my-active-project
-
-# Create the local skills container directory
+# 1. Create the target folder in your repository (example for Codex)
 mkdir -p .agents/skills/
 
-# Symlink a specific skill (e.g., repo-triage)
+# 2. Symlink the individual skill folder
 ln -s ~/repos/projects/agent-skills/skills/repo-triage .agents/skills/repo-triage
 ```
 
 ---
 
-## 🎛 2. Local Overlay Mode (8% of Use Cases)
+## 📁 Recommended Child Repo Layout
 
-An overlay extends a global skill with repo-specific parameters (like framework choices, specific test commands, or database names) without editing the global skill files.
+When configuring a child repository with various agentic frameworks and overlays, organize it using the following structure:
 
-The local agent reads the global `SKILL.md` first to load the core procedure, and then reads a local overlay file to adjust the boundary settings.
-
-### Structural Layout:
 ```
-my-active-project/
-├── .agents/
+<repo>/
+├── .agent/              <-- Local folder for Antigravity (Gemini)
 │   └── skills/
-│       ├── repo-triage ───► (Symlink to: ~/repos/projects/agent-skills/skills/repo-triage)
-│       └── repo-triage-overlay.md  <-- Local file containing repo-specific rules
+├── .agents/             <-- Local folder for Codex / general tools
+│   └── skills/
+├── .claude/             <-- Local folder for Claude Code
+│   └── skills/
+├── .github/             <-- GitHub folder (e.g. Copilot custom skills)
+│   └── skills/
+├── skills-overrides/    <-- Directory containing custom local markdown overlays
+└── .skillrc.yaml        <-- Local configuration mapping overlay boundaries
 ```
-
-### Example Overlay structure:
-```markdown
-# Local Overlay: repo-triage-overlay
-
-Extends: [repo-triage](file:///Users/pcoletsos/repos/projects/agent-skills/skills/repo-triage/SKILL.md)
-
-## Repo Context
-- Target Stack: Next.js (App Router), TypeScript, Tailwind CSS.
-- Core Tests: `npm run lint` and `npm run build`.
-
-## Overridden Rules
-- Always prioritize issues marked with the `critical-bug` label before inspecting feature milestones.
-```
-
-*See [templates/overlay-template.md](file:///Users/pcoletsos/repos/projects/agent-skills/templates/overlay-template.md) to quickly bootstrap a new overlay.*
 
 ---
 
-## 🍴 3. Forked-Local Mode (2% of Use Cases)
+## ⚙️ Example `.skillrc.yaml` File
 
-Forking is the permanent physical duplication of a skill folder. It severs the link to the global repository. Use this only when a project has exceptionally complex requirements that diverge completely from standard procedures.
+A `.skillrc.yaml` file resides at the child repository root to coordinate local configurations, overlay references, or execution parameters without altering the global skill.
 
-### Structural Layout:
-```
-my-active-project/
-├── .agents/
-│   └── skills/
-│       └── repo-triage/       <-- Complete physical copy of the skill folder
-│           ├── SKILL.md       <-- Custom instructions edited locally
-│           └── CHANGELOG.md
-```
+```yaml
+# Local Skill Configurations
+repo: "my-custom-project"
+version: "1.0.0"
 
-### Setup Commands:
-```bash
-# Navigate to your target repository
-cd ~/repos/projects/my-active-project
+skills:
+  repo-triage:
+    enabled: true
+    mode: overlay
+    overlay_path: "skills-overrides/repo-triage-overlay.md"
+    params:
+      tech_stack: ["Next.js", "TypeScript", "TailwindCSS"]
+      test_cmd: "npm run test"
+      lint_cmd: "npm run lint"
 
-# Create directory
-mkdir -p .agents/skills/
-
-# Copy the skill directory physically (no symlink)
-cp -r ~/repos/projects/agent-skills/skills/repo-triage .agents/skills/repo-triage
+  pr-review:
+    enabled: true
+    mode: linked-global
 ```
 
-### When to Fork:
-*   The project uses custom internal agent orchestrators that require incompatible YAML schema fields.
-*   The workflow relies on unique manual stages or proprietary compliance checks that are prohibited from being shared globally.
+---
+
+## ⚖️ When to Update Global vs. Create Overlay
+
+Use the following guidelines to decide where to introduce a change:
+
+### Update the Global Skill:
+- The change fixes a general bug, typo, or structural error in a procedure.
+- The workflow step is universally applicable (e.g., adding an "E2E tests" checklist item to `pr-review`).
+- You are improving a methodology that benefits all developer workspaces.
+
+### Create a Local Overlay:
+- The change is specific to a technology stack not used globally (e.g. specialized mobile configs).
+- The behavior involves private credentials, company-specific hostnames, or internal tooling paths.
+- The rule is highly experimental and you want to test it locally first.
+
+---
+
+## 🚀 Separate PR Rule for Global Skill Changes
+
+All modifications to files within the global `skills/` directory **MUST** be performed in a dedicated, isolated Pull Request in the `agent-skills` repository.
+
+- **Do NOT** bundle a global skill enhancement with local feature development or bug fixes in a consuming repository.
+- Bundling edits poses the risk of introducing unintended behavioral regressions globally or polluting the shared workspace with local contexts.
+- Each global update requires a version increment, updating the skill's local `CHANGELOG.md`, and keeping the `registry.yaml` registry in sync.
