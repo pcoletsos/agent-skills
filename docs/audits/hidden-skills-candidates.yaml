@@ -1,0 +1,163 @@
+candidates:
+- name: agent-conversational-git
+  source_repo: projects/creator-knowledge-pipeline
+  source_file: CONTRIBUTING.md
+  category: global-skill-candidate
+  likely_target: new global skill
+  affected_existing_skill: repo-triage
+  summary: Defines a standardized conversational shorthand vocabulary (what next?,
+    start, record, publish, propose, land, ship, finish) mapping directly to atomic
+    git actions.
+  why_reusable: Universal conversational git interface for pairing with AI agents
+    across all environments.
+  why_repo_specific: Branch prefix conventions may need minor local overrides.
+  suggested_action: Create new global skill `agent-conversational-git`.
+  reusability_score: 5
+  maturity_score: 5
+  risk_score: 2
+  priority: high
+- name: knowledge-vault-curation
+  source_repo: knowledge/learning-vault
+  source_file: AGENTS.md
+  category: global-skill-candidate
+  likely_target: new global skill
+  affected_existing_skill: None
+  summary: Rules for Obsidian-first / Markdown-first vault curation including lowercase
+    names, shallow folders, relative links, source blocks, and MOC index updates.
+  why_reusable: Applies directly to any personal or professional markdown knowledge
+    repository.
+  why_repo_specific: Folder directories are domain-specific.
+  suggested_action: Create new global skill `knowledge-vault-curation`.
+  reusability_score: 5
+  maturity_score: 5
+  risk_score: 1
+  priority: high
+- name: llm-run-tracking
+  source_repo: work/aliki-douka-writing-system
+  source_file: AGENTS.md
+  category: global-skill-candidate
+  likely_target: new global skill
+  affected_existing_skill: None
+  summary: Convention for audit-logging LLM prompt execution and output analysis runs
+    under runs/draft-vN/ (meta, input, raw output, summary, action plan).
+  why_reusable: Extremely useful for transparent LLM operations, content auditing,
+    and model output tracking.
+  why_repo_specific: Draft naming schemes may differ.
+  suggested_action: Create new global skill `llm-run-tracking`.
+  reusability_score: 5
+  maturity_score: 4
+  risk_score: 1
+  priority: high
+- name: strict-privacy-gate
+  source_repo: projects/creator-knowledge-pipeline
+  source_file: CONTRIBUTING.md
+  category: existing-skill-improvement
+  likely_target: update existing skill
+  affected_existing_skill: repo-triage
+  summary: A strict safety blacklist of files and contents agents must never commit
+    (credentials, session cookies, paid content transcripts, children's faces/names).
+  why_reusable: Crucial global safety guideline for all codebases.
+  why_repo_specific: File structures or tokens of interest vary by domain.
+  suggested_action: Update global skills `repo-triage` and `pr-review` with privacy
+    check constraints.
+  reusability_score: 5
+  maturity_score: 5
+  risk_score: 1
+  priority: high
+- name: agent-git-hygiene
+  source_repo: projects/creator-knowledge-pipeline
+  source_file: CONTRIBUTING.md
+  category: existing-skill-improvement
+  likely_target: update existing skill
+  affected_existing_skill: pr-review
+  summary: Convention for agent git branch naming (<actor>/<type>/<scope>/<task>-<id>)
+    and Conventional Commit PR titles to enable clean squash-merges.
+  why_reusable: Enhances git history clarity across all shared repositories.
+  why_repo_specific: Scope definitions differ per repo.
+  suggested_action: Update `pr-review` and `issue-planning` skills to check and enforce
+    git hygiene rules.
+  reusability_score: 5
+  maturity_score: 5
+  risk_score: 1
+  priority: high
+- name: repo-memory-logs
+  source_repo: knowledge/learning-vault
+  source_file: AGENTS.md
+  category: existing-skill-improvement
+  likely_target: update existing skill
+  affected_existing_skill: agent-session-handoff
+  summary: Rules for updating DECISIONS.md, MEMORY.md, and TODO.md upon repo convention
+    or runtime assumption changes to preserve long-term memory.
+  why_reusable: Keeps session state stable across agent boundaries in any repository.
+  why_repo_specific: Exact log filenames could differ.
+  suggested_action: Update `agent-session-handoff` and `repo-triage` skills with memory
+    log preservation routines.
+  reusability_score: 5
+  maturity_score: 5
+  risk_score: 1
+  priority: high
+- name: architecture-diagram-curation
+  source_repo: projects/homelab/homelab-infra
+  source_file: AGENTS.md
+  category: existing-skill-improvement
+  likely_target: update existing skill
+  affected_existing_skill: tech-stack-visual
+  summary: Treats diagrams (Mermaid, Excalidraw, PNG renders) as durable documentation
+    assets versioned under docs/architecture/diagrams/vN/.
+  why_reusable: Ensures architecture visuals are curated as code rather than throwaway
+    assets.
+  why_repo_specific: Target directory could differ.
+  suggested_action: Update `tech-stack-visual` and `architecture-review` skills with
+    visual asset preservation rules.
+  reusability_score: 5
+  maturity_score: 4
+  risk_score: 1
+  priority: medium
+- name: python-uv-hygiene
+  source_repo: projects/creator-knowledge-pipeline
+  source_file: CONTRIBUTING.md
+  category: global-skill-candidate
+  likely_target: new global skill
+  affected_existing_skill: None
+  summary: Structured workflow for maintaining Python project dependencies using uv,
+    pyproject.toml, and frozen lockfiles.
+  why_reusable: Modern Python project dependency management standard.
+  why_repo_specific: Specific testing command or module path varies.
+  suggested_action: Create new global skill `python-uv-hygiene`.
+  reusability_score: 5
+  maturity_score: 4
+  risk_score: 2
+  priority: medium
+- name: homelab-service-onboarding
+  source_repo: projects/homelab/homelab-infra
+  source_file: AGENTS.md
+  category: overlay-candidate
+  likely_target: repo overlay
+  affected_existing_skill: None
+  summary: 'Checklist for onboarding new services to the homelab cluster: deploying
+    on K3s on takis-nuc, validating via kubectl kustomize, keeping secrets out of
+    git, updating current-state.md.'
+  why_reusable: Reusable for k3s cluster orchestration.
+  why_repo_specific: Tied to takis-nuc, specific homelab paths, and host scripts.
+  suggested_action: Create as overlay on general deployment skill or keep local.
+  reusability_score: 2
+  maturity_score: 4
+  risk_score: 3
+  priority: medium
+- name: career-listing-intake
+  source_repo: knowledge/career-playbook
+  source_file: AGENTS.md
+  category: repo-local-rule
+  likely_target: keep repo-local
+  affected_existing_skill: None
+  summary: 'Structured workflow to ingest a new job listing: checking for duplicates,
+    creating listing note and analysis note from templates, logging in applications
+    pipeline.'
+  why_reusable: Provides standard templates and tracking pipelines.
+  why_repo_specific: Directly depends on career playbook folder layout, connection
+    ID schemes, and custom index scripts.
+  suggested_action: Keep purely as repo-local rule.
+  reusability_score: 2
+  maturity_score: 5
+  risk_score: 2
+  priority: low

@@ -64,3 +64,48 @@ skills:
       - visualization
       - diagramming
       - documentation
+
+  - name: agent-conversational-git
+    path: skills/agent-conversational-git
+    version: 0.1.0
+    status: draft
+    description: Standardized conversational shorthand commands mapping directly to atomic Git workflows.
+    recommended_mode: linked-global
+    tags:
+      - git
+      - workflow
+      - developer-experience
+
+  - name: knowledge-vault-curation
+    path: skills/knowledge-vault-curation
+    version: 0.1.0
+    status: draft
+    description: Guidelines and workflows for Obsidian-first and Markdown-first personal knowledge management vault curation.
+    recommended_mode: linked-global
+    tags:
+      - obsidian
+      - knowledge-vault
+      - curation
+
+  - name: llm-run-tracking
+    path: skills/llm-run-tracking
+    version: 0.1.0
+    status: draft
+    description: Conventions for maintaining a structured audit-trail of LLM execution runs, inputs, raw outputs, and downstream action items.
+    recommended_mode: linked-global
+    tags:
+      - llm
+      - prompt-engineering
+      - audit-trail
+
+  - name: python-uv-hygiene
+    path: skills/python-uv-hygiene
+    version: 0.1.0
+    status: draft
+    description: Procedures for managing Python virtual environments, dependencies, and validation tasks using the uv package manager.
+    recommended_mode: linked-global
+    tags:
+      - python
+      - uv
+      - dependency-management
+
