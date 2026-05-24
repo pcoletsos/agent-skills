@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0
+
+- date: 2026-05-24
+- source repo or source task: Existing Skills Hardening (Milestone #2)
+- reason for change: Enhance agent security posture, prevent session context loss, and handle conversational what-next shortcuts.
+- summary of change: Integrated strict privacy validation steps, loaded memory logs check, and integrated "what next?" command workflow.
+- expected behavior change: Agent will abort on credentials leak, read historical decisions/memory context, and suggest immediate singular actions for what-next triggers.
+- risk: Low
+
 ## 0.1.1
 
 - date: 2026-05-23

@@ -1,7 +1,7 @@
 skills:
   - name: repo-triage
     path: skills/repo-triage
-    version: 0.1.1
+    version: 0.2.0
     status: draft
     description: Review a software repository, inspect project state, and prioritize next actions.
     recommended_mode: linked-global
@@ -12,7 +12,7 @@ skills:
 
   - name: pr-review
     path: skills/pr-review
-    version: 0.1.0
+    version: 0.2.0
     status: draft
     description: Review pull requests or code changes for quality, correctness, and architecture fit.
     recommended_mode: linked-global
@@ -23,7 +23,7 @@ skills:
 
   - name: architecture-review
     path: skills/architecture-review
-    version: 0.1.0
+    version: 0.2.0
     status: draft
     description: Review architecture decisions, boundaries, coupling, and tactical-strategic fit.
     recommended_mode: linked-global
@@ -34,7 +34,7 @@ skills:
 
   - name: issue-planning
     path: skills/issue-planning
-    version: 0.1.0
+    version: 0.2.0
     status: draft
     description: Turn rough goals into milestones, structured issues, and clean acceptance criteria.
     recommended_mode: linked-global
@@ -45,7 +45,7 @@ skills:
 
   - name: agent-session-handoff
     path: skills/agent-session-handoff
-    version: 0.1.0
+    version: 0.2.0
     status: draft
     description: Compile exact context and state changes to ensure a zero-loss session handoff.
     recommended_mode: linked-global
@@ -56,7 +56,7 @@ skills:
 
   - name: tech-stack-visual
     path: skills/tech-stack-visual
-    version: 0.1.0
+    version: 0.2.0
     status: draft
     description: Inspect repository tools and compile inputs for high-quality technical graphics/prompts.
     recommended_mode: overlay-compatible
