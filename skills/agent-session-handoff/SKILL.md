@@ -1,7 +1,7 @@
 ---
 name: agent-session-handoff
 description: Summarize an active development session so that a subsequent AI agent or developer can seamlessly and safely resume execution.
-version: 0.1.0
+version: 0.2.0
 status: draft
 ---
 
@@ -29,10 +29,12 @@ Compile a precise, comprehensive workspace summary detailing completed edits, co
 2.  **Compile Files Touched**: List all created, modified, or deleted files. Provide relative paths.
 3.  **List Executed Commands**: Record the exact commands executed (e.g. build scripts, compilation steps, database runs).
 4.  **List Tests Run**: Detail what test suites were executed, which passed, and which failed.
-5.  **Document Open Questions**: Call out any design ambiguities, unresolved bugs, or missing clarifications that require user feedback.
-6.  **Flag Immediate Risks**: Identify high-risk factors (e.g., breaking changes, untested legacy modules, uncommitted configurations).
-7.  **Map Next Recommended Steps**: Write a chronological checklist of actions the subsequent agent should execute first.
-8.  **Declare Uncertainty**: Never hide confusion or guess outcomes. If you are unsure of a dependency or the validity of a test, explicitly declare it.
+5.  **Update Memory & Decision Logs**: Write structural/workflow convention changes to `DECISIONS.md`, and new stable runtime assumptions/environment variables to `MEMORY.md`. Ensure these logs reflect the final state of the repository.
+6.  **Maintain local `progress.md`**: Verify the presence of a repository-local `progress.md` file (or equivalent session-level checklist) and update it to accurately document completed tasks, active items, current blockers, and next steps.
+7.  **Document Open Questions**: Call out any design ambiguities, unresolved bugs, or missing clarifications that require user feedback.
+8.  **Flag Immediate Risks**: Identify high-risk factors (e.g., breaking changes, untested legacy modules, uncommitted configurations).
+9.  **Map Next Recommended Steps**: Write a chronological checklist of actions the subsequent agent should execute first.
+10. **Declare Uncertainty**: Never hide confusion or guess outcomes. If you are unsure of a dependency or the validity of a test, explicitly declare it.
 
 ## Output Format
 Render a clean Markdown handoff report:
@@ -67,6 +69,7 @@ Render a clean Markdown handoff report:
 ## Rules
 - **Be completely transparent.** If a build is broken or a test is failing, place that at the very top of the handoff report.
 - Do NOT guess file names or status. Check `git status` directly before writing the handoff.
+- **Enforce Context Durability**: Always perform a formal update to `DECISIONS.md`, `MEMORY.md`, and `progress.md` before initiating handoff. Never allow active session knowledge to remain locked in the agent's context or lost upon shut down.
 
 ## Global Skill Change Policy
 This is a shared, global skill. Do NOT add repo-specific details or credentials. Any modifications to this skill's behavior must be performed in a dedicated Pull Request within the `agent-skills` repository, requiring a version bump and an entry in `CHANGELOG.md`.

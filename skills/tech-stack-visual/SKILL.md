@@ -1,7 +1,7 @@
 ---
 name: tech-stack-visual
 description: Inspect a repository's tooling to compile accurate prompts, schemas, or markdown code (Mermaid/PlantUML) for architecture diagrams.
-version: 0.1.0
+version: 0.2.0
 status: draft
 ---
 
@@ -33,7 +33,9 @@ Examine a codebase to identify confirmed software components, runtime environmen
     *   Construct visual flowcharts or sequence diagrams using crisp, error-free Mermaid or PlantUML code.
     *   Ensure all node names containing brackets, parentheses, or unique characters are safely quoted (e.g. `node["Label (Extra Info)"]`).
     *   Avoid using HTML tags inside Mermaid labels.
-6.  **Create a Visual Prompt**: If complex external graphic design is required, compile an extremely descriptive, contextual text prompt that the user can feed into high-end image generators (e.g., Midjourney, DALL-E) or diagram tools (e.g., Eraser.io, Miro).
+6.  **Durable Diagram Curation**: Treat committed diagrams (Mermaid code files, Excalidraw designs, or rendered PNGs) as first-class, versioned documentation assets. Always save and organize them under a standardized directory path: `docs/architecture/diagrams/vN/` (e.g., `docs/architecture/diagrams/v1/`). Never treat them as transient build outputs.
+7.  **Apply Image Sizing & Dimensions**: When exporting or designing visual graphics, adhere strictly to standardized aspect ratios and sizes suitable for corporate/social documentation (e.g., 16:9 landscape aspect ratio, readable font sizes relative to the canvas, high contrast dark-mode compatible palettes).
+8.  **Create a Visual Prompt**: If complex external graphic design is required, compile an extremely descriptive, contextual text prompt that the user can feed into high-end image generators (e.g., Midjourney, DALL-E) or diagram tools (e.g., Eraser.io, Miro).
 
 ## Output Format
 Render a clean Markdown visual design pack:
@@ -60,6 +62,8 @@ graph TD
 ## Rules
 - **NEVER invent or assume technologies.** Only diagram modules, services, databases, or deployment environments that are explicitly verified in the project's source code or documentation.
 - Ensure all Mermaid diagrams are syntactically valid. Never leave open-ended brackets or unquoted special characters in node definitions.
+- **Commit as Durable Documentation**: All visual architecture assets must be committed and versioned in the project repository under `docs/architecture/diagrams/vN/`. Do not leave them as uncommitted local files or temporary assets.
+- **Sizing Layout Harmony**: Maintain strict dimension and typography hygiene. Renders must use high-contrast dark/light toggle friendly backgrounds and consistent layout flows.
 
 ## Global Skill Change Policy
 This is a shared, global skill. Do NOT add repo-specific details or credentials. Any modifications to this skill's behavior must be performed in a dedicated Pull Request within the `agent-skills` repository, requiring a version bump and an entry in `CHANGELOG.md`.

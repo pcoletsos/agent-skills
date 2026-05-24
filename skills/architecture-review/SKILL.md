@@ -1,7 +1,7 @@
 ---
 name: architecture-review
 description: Review architectural design, module boundaries, package coupling, dependency flows, and long-term codebase maintainability.
-version: 0.1.0
+version: 0.2.0
 status: draft
 ---
 
@@ -34,6 +34,7 @@ Analyze the structural boundaries, data layers, dependency couplings, and interf
 5.  **Separate Tactical from Strategic Recommendations**:
     *   **Tactical**: Immediate, high-signal, risk-free adjustments needed to unblock a feature or fix a bug under the current architecture.
     *   **Strategic**: Long-term structural upgrades, migration paths, or refactoring designs that require deep planning and multi-stage reviews.
+6.  **Durable Diagram Referencing**: When reviewing structural or module design changes, verify if the current codebase maps to any versioned graphic/diagram under `docs/architecture/diagrams/vN/`. Require that any proposed structural modifications update or explicitly reference these durable visual assets to keep code and visualization strictly aligned.
 
 ## Output Format
 Render a clean Markdown architecture report:
@@ -62,6 +63,7 @@ Render a clean Markdown architecture report:
 ## Rules
 - **Do NOT propose sweeping architectural overhauls for simple tasks.** Maintain a high respect for the existing author's design decisions unless they explicitly violate functional requirements.
 - Focus strictly on high-cohesion and low-coupling principles.
+- **Maintain Diagram Alignment**: Ensure all recommended module boundary or component modifications include updates or matching adjustments to versioned visual blueprints under `docs/architecture/diagrams/vN/`. Do not allow documentation drift.
 
 ## Global Skill Change Policy
 This is a shared, global skill. Do NOT add repo-specific details or credentials. Any modifications to this skill's behavior must be performed in a dedicated Pull Request within the `agent-skills` repository, requiring a version bump and an entry in `CHANGELOG.md`.
