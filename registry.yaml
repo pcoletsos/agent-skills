@@ -109,3 +109,16 @@ skills:
       - uv
       - dependency-management
 
+  - name: service-onboarding
+    path: skills/service-onboarding
+    version: 0.1.0
+    status: draft
+    description: Procedures for safely and consistently onboarding new services or microservices into a software stack.
+    recommended_mode: overlay-compatible
+    tags:
+      - deployment
+      - onboarding
+      - infrastructure
+      - operations
+
+
