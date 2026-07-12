@@ -67,7 +67,7 @@ skills:
 
   - name: agent-conversational-git
     path: skills/agent-conversational-git
-    version: 0.1.0
+    version: 0.1.1
     status: draft
     description: Standardized conversational shorthand commands mapping directly to atomic Git workflows.
     recommended_mode: linked-global
