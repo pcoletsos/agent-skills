@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1
+
+- date: 2026-07-12
+- source repo or source task: agent-skills
+- reason for change: Standardize inspection of active state with "what next?" command integration.
+- summary of change: Updated state inspection to leverage the unified decision tree check for what-next shortcuts.
+- expected behavior change: Agents will recommend single immediate actions based on git status and issue backlog matching.
+- risk: Low
+
 ## 0.2.0
 
 - date: 2026-05-24

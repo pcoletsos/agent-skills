@@ -1,7 +1,7 @@
 ---
 name: repo-triage
 description: Review a software repository, inspect project state, read issues/milestones, identify blockers, and recommend next implementation steps.
-version: 0.2.0
+version: 0.2.1
 status: draft
 ---
 
@@ -30,9 +30,9 @@ Examine a new or active software repository to map its structure, evaluate curre
 1.  **Inspect Structure**: List the contents of the repository root. Identify the location of application code vs. configurations.
 2.  **Read Onboarding and Memory Files**: View the contents of onboarding documents (`README.md`, `AGENTS.md`, `CLAUDE.md`) and memory logs (`DECISIONS.md`, `MEMORY.md` if present). Ingest local conventions, structural boundaries, and stable runtime decisions to prevent session-context loss.
 3.  **Inspect Active State & shorthand requests**:
-    *   Run `git status` or check current branch information.
-    *   Query open issues/milestones to understand live backlogs.
-    *   If triggered by the shorthand `"what next?"` command, execute a rapid scan of the current git status and milestones to recommend a single, immediate high-impact action.
+    *   Run local Git status and checks (`git status --short --branch`, etc.).
+    *   Query open issues/milestones using native platform GitHub tools/plugins or `gh` CLI commands to understand live backlogs.
+    *   If triggered by the shorthand `"what next?"` command, execute the unified decision tree (checking for detached HEAD, local changes, branch sync status, committed work, open PRs/checks, stale branches, and open issues) to recommend a single, immediate high-impact action.
 4.  **Strict Privacy Gate Validation**: Verify that there are no active secrets, SQLite database files, local `.cookie` files, or raw content/chat transcripts stored in tracked/active folders.
 5.  **Group Work Areas**: Organize codebase findings into these dimensions:
     *   **Bugs**: System failures, syntax errors, regressions.

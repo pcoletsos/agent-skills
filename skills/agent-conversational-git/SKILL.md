@@ -1,7 +1,7 @@
 ---
 name: agent-conversational-git
 description: Standardized conversational shorthand commands mapping directly to atomic Git workflows.
-version: 0.1.0
+version: 0.1.1
 status: draft
 ---
 
@@ -27,9 +27,19 @@ Standardize conversational prompts to execute deterministic, safe, and hygiene-c
 1.  **Map Conversational Prompts**:
     Execute the exact sequence of Git/system actions corresponding to the received shorthand prompt:
     *   **`what next?`**:
-        1. Run `git status` to identify uncommitted changes or active branch.
-        2. Run `git log -n 5` or check local task tracker.
-        3. Recommend the single next logical action (e.g. "Run `start <task>` to open a branch" or "Run `ship it` to propose your changes").
+        1. Run `git status --short --branch`, `git branch --show-current`, `git diff --stat`, and `git log --oneline --decorate -5` to inspect the local Git state.
+        2. Query GitHub state using native platform GitHub tools/plugins (e.g., `github_view_pr`, `github_list_issues`) if available, or the command-line `gh` CLI (checking `gh auth status`, `gh pr status`, `gh issue list --state open`, `gh api` for milestones, and branch-specific status via `gh pr view` and `gh run list`). Fallback gracefully to offline mode if authentication or connection fails.
+        3. Recommend the single next logical action using this decision order:
+           - **Detached HEAD:** If in a detached HEAD state with work to do, recommend creating/checking out a branch (`start <task>` or `git checkout -b <branch>`).
+           - **Local Changes:** If local uncommitted changes exist, recommend `record it` (or continuing implementation/validation).
+           - **Out of Sync:** If the branch is behind remote/default branch, recommend pulling/syncing.
+           - **Committed Local Work:** If on a non-default branch with committed work not pushed, recommend `publish it`.
+           - **Pushed Work but No PR:** If work is pushed but no PR exists, recommend `propose it`.
+           - **PR with Blockers:** If a PR exists with pending checks/reviews or is a draft, recommend resolving errors or waiting on checks.
+           - **PR Ready:** If PR is approved and checks pass, recommend `land it`.
+           - **Stale Branch:** If the PR is already merged/closed, recommend switching back to the default branch and deleting the local branch.
+           - **Ready for New Work:** If no active branch work exists, recommend one open issue to `start <task>`.
+           - **Ambiguous/Blocked:** If blocked or state is ambiguous, report the blocker and request clarification.
     *   **`start <task>`**:
         1. Reuse an existing issue or create a new issue for tracking.
         2. Identify the correct branch name using the rules in the **Rules** section.

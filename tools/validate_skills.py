@@ -52,7 +52,7 @@ def main():
         print(f"Error: {REGISTRY_FILE} not found")
         return 1
 
-    with open(REGISTRY_FILE, "r") as f:
+    with open(REGISTRY_FILE, "r", encoding="utf-8") as f:
         registry_content = f.read()
 
     registry_names = []
@@ -86,7 +86,7 @@ def main():
         if not changelog_md.exists():
             errors.append(f"Missing CHANGELOG.md in {folder}")
 
-        with open(skill_md, "r") as f:
+        with open(skill_md, "r", encoding="utf-8") as f:
             content = f.read()
 
         if not content.startswith("---"):
