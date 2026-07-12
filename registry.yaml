@@ -1,7 +1,7 @@
 skills:
   - name: repo-triage
     path: skills/repo-triage
-    version: 0.2.0
+    version: 0.2.1
     status: draft
     description: Review a software repository, inspect project state, and prioritize next actions.
     recommended_mode: linked-global
