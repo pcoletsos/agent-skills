@@ -1,7 +1,7 @@
 ---
 name: agent-conversational-git
 description: Standardized conversational shorthand commands mapping directly to atomic Git workflows.
-version: 0.1.1
+version: 0.2.0
 status: draft
 ---
 
@@ -12,7 +12,7 @@ Standardize conversational prompts to execute deterministic, safe, and hygiene-c
 
 ## Use When
 - The pairing agent is executing local task cycles (branching, committing, pushing, opening PRs, merging).
-- The user uses conversational shorthand triggers like `what next?`, `start <task>`, `record it`, `ship it`, `finish it`.
+- The user uses conversational shorthand triggers like `what next?`, `what next table?`, `start <task>`, `record it`, `ship it`, `finish it`.
 
 ## Do Not Use When
 - Performing complex rebases, cherry-picks, or resolving merge conflicts that require custom manual interventions.
@@ -40,6 +40,15 @@ Standardize conversational prompts to execute deterministic, safe, and hygiene-c
            - **Stale Branch:** If the PR is already merged/closed, recommend switching back to the default branch and deleting the local branch.
            - **Ready for New Work:** If no active branch work exists, recommend one open issue to `start <task>`.
            - **Ambiguous/Blocked:** If blocked or state is ambiguous, report the blocker and request clarification.
+    *   **`what next table?`** (aliases: `what next tb?`, `what next in table?`):
+        1. Run the exact same state-gathering and decision tree as `what next?` above to resolve the current case.
+        2. If the resolved case is **Ready for New Work**, or otherwise surfaces more than one candidate to weigh (e.g. several open PRs awaiting action), render the candidates as a Markdown table instead of prose, with columns:
+           - **#**: issue or PR number, linked to its title.
+           - **Priority**: from labels, if the repository uses them.
+           - **Difficulty**: `Low` / `Medium` / `High`. Read each candidate's actual description, not its title, and rate on three axes, taking the highest: **scope** (how many files or systems it touches), **judgment** (one mechanical fix applied repeatedly, vs. design decisions with no single right answer), and **risk & reach** (stays inside the codebase, vs. touches production infrastructure, external services, or configuration a human owns).
+           - **Why**: one clause naming the axis that drove the rating, so it can be checked rather than trusted.
+        3. A `High` driven by the risk-and-reach axis is worth calling out explicitly in the `Why` column: it likely needs a human in the loop regardless of which model or agent runs it, since the ceiling there is authorization, not capability.
+        4. If the resolved case has only one actionable item (`record it`, `land it`, and similar single-branch states), a table adds nothing over one row: fall back to the standard `what next?` bulleted Output Format.
     *   **`start <task>`**:
         1. Reuse an existing issue or create a new issue for tracking.
         2. Identify the correct branch name using the rules in the **Rules** section.
@@ -70,6 +79,8 @@ Upon executing any shorthand prompt, output a clear, concise bulleted summary of
 1.  **Actions Performed**: The Git commands or status updates executed.
 2.  **Current Git State**: Active branch name, commit hash, and remote tracking status.
 3.  **Next Recommended Action**: The next step in the conversational workflow.
+
+`what next table?` replaces point 3 with the Markdown table described in its Procedure entry whenever there is more than one candidate to compare; a single-candidate resolution still uses this bulleted format, per that command's own fallback rule.
 
 Example:
 ```markdown
