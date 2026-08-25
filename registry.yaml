@@ -121,4 +121,18 @@ skills:
       - infrastructure
       - operations
 
+  - name: multi-repo-sync-audit
+    path: skills/multi-repo-sync-audit
+    version: 0.1.0
+    status: draft
+    description: Audit multi-repository sync status, uncommitted local changes, stashes, and open GitHub PRs/CI health across workspace directories.
+    recommended_mode: linked-global
+    tags:
+      - git
+      - multi-repo
+      - synchronization
+      - preflight
+      - pull-requests
+
+
 
