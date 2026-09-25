@@ -31,8 +31,11 @@ Examine a codebase to identify confirmed software components, runtime environmen
 4.  **Trace Data Flow**: Document how data traverses the system (e.g., from the client browser -> serverless route -> database API -> third-party webhooks).
 5.  **Generate Mermaid or PlantUML**:
     *   Construct visual flowcharts or sequence diagrams using crisp, error-free Mermaid or PlantUML code.
-    *   Ensure all node names containing brackets, parentheses, or unique characters are safely quoted (e.g. `node["Label (Extra Info)"]`).
+    *   Use supported diagram types: `flowchart TD/LR`, `graph TD/LR`, `stateDiagram-v2`, `sequenceDiagram`, `classDiagram`, `erDiagram`, `xychart-beta`. Avoid unsupported types like `gantt` (use phased `flowchart TD` subgraphs for roadmaps instead).
+    *   Never use square brackets `[...]` inside square-bracketed node definitions (e.g. avoid `nodeId["[DONE] Task"]` because the inner `]` closes the node prematurely). Use plain prefixes or parentheses instead (e.g. `nodeId["Done: Task"]` or `nodeId["(Done) Task"]`).
+    *   Ensure all node names containing parentheses, colons, slashes, or special characters are safely quoted (e.g. `node["Label (Extra Info)"]`).
     *   Avoid using HTML tags inside Mermaid labels.
+    *   Maintain dark theme contrast: In dark mode environments, avoid light pastel backgrounds that wash out light text. Use dark background fills with vibrant borders and explicit `color:#ffffff`.
 6.  **Durable Diagram Curation**: Treat committed diagrams (Mermaid code files, Excalidraw designs, or rendered PNGs) as first-class, versioned documentation assets. Always save and organize them under a standardized directory path: `docs/architecture/diagrams/vN/` (e.g., `docs/architecture/diagrams/v1/`). Never treat them as transient build outputs.
 7.  **Apply Image Sizing & Dimensions**: When exporting or designing visual graphics, adhere strictly to standardized aspect ratios and sizes suitable for corporate/social documentation (e.g., 16:9 landscape aspect ratio, readable font sizes relative to the canvas, high contrast dark-mode compatible palettes).
 8.  **Create a Visual Prompt**: If complex external graphic design is required, compile an extremely descriptive, contextual text prompt that the user can feed into high-end image generators (e.g., Midjourney, DALL-E) or diagram tools (e.g., Eraser.io, Miro).
