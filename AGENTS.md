@@ -36,6 +36,11 @@ Read these rules carefully before making any edits.
 6.  **Registry Upkeep**:
     *   Whenever you add, delete, rename, or update the version/status of a skill, you **MUST** update [registry.yaml](file:///Users/pcoletsos/repos/projects/agent-skills/registry.yaml) immediately to maintain synchronization.
 
+7.  **Strict Prohibition on Em Dashes (M-Dashes)**:
+    *   **NEVER** use em dashes (`—` or `--` used as an em dash) in any agent output, response text, articles, documentation, prompts, or skill definitions.
+    *   Em dashes are recognized as an immediate, jarring AI signature.
+    *   Use commas, parentheses, colons, or split into separate clean sentences instead.
+
 ---
 
 ## 🛠 File Layout Rules
@@ -94,3 +99,4 @@ Canonical spec and tooling live in `koletsos-portfolio`:
 - Protocol: https://github.com/pcoletsos/koletsos-portfolio/blob/main/docs/agent-execution-protocol.md
 - Scripts: https://github.com/pcoletsos/koletsos-portfolio/tree/main/scripts
   (`github-agent-receipt.ps1`, `github-agent-needs-input.ps1`, `github-agent-queue.ps1`)
+

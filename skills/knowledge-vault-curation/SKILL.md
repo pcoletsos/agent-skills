@@ -84,6 +84,7 @@ Provide a concise, 2-3 sentence overview of the note's purpose, key takeaways, a
 - **No Wiki Links**: Prefer standard relative Markdown links (`[Link Text](../path/file.md)`) to maximize cross-platform compatibility and HTML portability.
 - **Maintain Shallow Directories**: Avoid nesting folders deeper than two levels beneath the vault root. Route ambiguous or multi-topic items to `resources/` or `inbox/`.
 - **Source Integrity**: Every durable note must preserve the source URL, provider, platform, and capture date in its `## Source` block. Never delete this block when updating a note.
+- **Strict Prohibition on Em Dashes**: Never use em dashes (`—` or `--` used as an em dash) in notes, summaries, or descriptions. Use commas, parentheses, colons, or separate sentences instead.
 
 ## Global Skill Change Policy
 This is a shared, global skill. Do NOT add repo-specific details or credentials. Any modifications to this skill's behavior must be performed in a dedicated Pull Request within the `agent-skills` repository, requiring a version bump and an entry in `CHANGELOG.md`.

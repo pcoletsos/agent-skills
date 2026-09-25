@@ -134,5 +134,18 @@ skills:
       - preflight
       - pull-requests
 
+  - name: prose-style-guide
+    path: skills/prose-style-guide
+    version: 0.1.0
+    status: draft
+    description: Enforce human-authentic, anti-AI writing standards for responses, articles, drafts, and notes. Prohibits em dashes and AI cliches.
+    recommended_mode: linked-global
+    tags:
+      - writing
+      - prose
+      - anti-ai
+      - style-guide
+      - authoring
+
 
 
