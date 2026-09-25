@@ -147,5 +147,27 @@ skills:
       - style-guide
       - authoring
 
+  - name: check-recorded-issues
+    path: skills/check-recorded-issues
+    version: 0.1.0
+    status: draft
+    description: Inspect, audit, filter, and cross-reference recorded issues, bug reports, and action trackers across GitHub and local repository registers.
+    recommended_mode: linked-global
+    tags:
+      - issues
+      - audit
+      - tracking
+      - triage
 
-
+  - name: check-service-flows
+    path: skills/check-service-flows
+    version: 0.1.0
+    status: draft
+    description: Audit live service flows, operational health, failed systemd units, Docker container states, and runtime error logs across micro-kolbr00 and local environments.
+    recommended_mode: linked-global
+    tags:
+      - operations
+      - systemd
+      - docker
+      - health-check
+      - triage
