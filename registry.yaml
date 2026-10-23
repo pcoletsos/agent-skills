@@ -171,3 +171,18 @@ skills:
       - docker
       - health-check
       - triage
+
+  - name: personal-overtime-radar
+    path: skills/personal-overtime-radar
+    version: 0.1.0
+    status: draft
+    description: Audit, calculate, and reconcile personal engineering and architecture overtime across local macOS telemetry, Screenpipe activity intervals, power logs, Git commits, and calendar feeds.
+    recommended_mode: linked-global
+    tags:
+      - overtime
+      - telemetry
+      - reconciliation
+      - screenpipe
+      - payroll
+      - tracking
+
