@@ -49,14 +49,18 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def parse_iso(dt_str: str) -> datetime.datetime:
-    """Parse ISO datetime string, supporting variable fractional seconds and Z suffix."""
+    """Parse ISO datetime string, supporting variable fractional seconds and timezone offsets."""
     cleaned = dt_str.replace("Z", "+00:00")
     try:
-        return datetime.datetime.fromisoformat(cleaned)
+        dt = datetime.datetime.fromisoformat(cleaned)
     except Exception:
-        # Fallback manual extraction
         base = cleaned.split(".")[0]
-        return datetime.datetime.strptime(base, "%Y-%m-%dT%H:%M:%S")
+        dt = datetime.datetime.strptime(base, "%Y-%m-%dT%H:%M:%S")
+
+    # Ensure UTC timezone awareness if none is present
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt
 
 
 def round_payroll_hours(hours: float) -> float:
@@ -77,7 +81,7 @@ def round_payroll_hours(hours: float) -> float:
 
 
 def extract_telemetry(db_path: Path, start_dt: datetime.datetime, end_dt: datetime.datetime) -> list:
-    """Extract activity intervals and corroborating UI events from Screenpipe."""
+    """Extract activity intervals and corroborating titles from Screenpipe."""
     if not db_path.exists():
         print(f"Warning: Screenpipe database not found at {db_path}", file=sys.stderr)
         return []
@@ -86,34 +90,40 @@ def extract_telemetry(db_path: Path, start_dt: datetime.datetime, end_dt: dateti
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    start_iso = start_dt.strftime("%Y-%m-%dT00:00:00")
-    end_iso = end_dt.strftime("%Y-%m-%dT23:59:59")
+    # Screenpipe stores UTC timestamps; convert local boundary datetimes to UTC ISO strings
+    start_utc = start_dt.astimezone(datetime.timezone.utc)
+    end_utc = end_dt.astimezone(datetime.timezone.utc)
 
-    # Check available tables
+    start_iso = start_utc.strftime("%Y-%m-%dT%H:%M:%S")
+    end_iso = end_utc.strftime("%Y-%m-%dT%H:%M:%S")
+
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
     tables = {row[0] for row in cursor.fetchall()}
 
     intervals = []
-    if "activity_intervals" in tables:
+    if "activity_intervals" in tables and "activity_tasks" in tables:
         cursor.execute(
             """
-            SELECT start_time, end_time, duration, app_name, window_title
-            FROM activity_intervals
-            WHERE start_time >= ? AND end_time <= ?
-            ORDER BY start_time ASC
+            SELECT i.start_at, i.end_at, t.title, t.app_name
+            FROM activity_intervals i
+            JOIN activity_tasks t ON i.task_id = t.id
+            WHERE i.start_at >= ? AND i.start_at <= ?
+            ORDER BY i.start_at ASC
             """,
             (start_iso, end_iso),
         )
         for row in cursor.fetchall():
+            start_local = parse_iso(row["start_at"]).astimezone()
+            end_local = parse_iso(row["end_at"]).astimezone()
+            duration = (end_local - start_local).total_seconds()
             intervals.append({
-                "start": parse_iso(row["start_time"]),
-                "end": parse_iso(row["end_time"]),
-                "duration": row["duration"] if row["duration"] else 0.0,
+                "start": start_local,
+                "end": end_local,
+                "duration": max(0.0, duration),
                 "app": row["app_name"] or "",
-                "title": row["window_title"] or "",
+                "title": row["title"] or "",
             })
     elif "frames" in tables:
-        # Fallback to OCR frames aggregation if intervals table is absent
         cursor.execute(
             """
             SELECT timestamp, app_name, window_name
@@ -123,12 +133,11 @@ def extract_telemetry(db_path: Path, start_dt: datetime.datetime, end_dt: dateti
             """,
             (start_iso, end_iso),
         )
-        raw_frames = cursor.fetchall()
-        for row in raw_frames:
-            ts = parse_iso(row["timestamp"])
+        for row in cursor.fetchall():
+            ts_local = parse_iso(row["timestamp"]).astimezone()
             intervals.append({
-                "start": ts,
-                "end": ts + datetime.timedelta(seconds=10),
+                "start": ts_local,
+                "end": ts_local + datetime.timedelta(seconds=10),
                 "duration": 10.0,
                 "app": row["app_name"] or "",
                 "title": row["window_name"] or "",
@@ -151,7 +160,7 @@ def process_daily_overtime(intervals: list) -> list:
         weekday = day_date.weekday()  # 0=Mon, 4=Fri, 5=Sat, 6=Sun
         is_weekend = weekday in (5, 6)
 
-        # Determine contract cutoff
+        # Determine contract cutoff in local time
         if is_weekend:
             cutoff = datetime.time(0, 0, 0)
         elif weekday == 4:  # Friday
@@ -169,10 +178,9 @@ def process_daily_overtime(intervals: list) -> list:
         if not after_hours:
             continue
 
-        # Sort after-hours items chronologically
         after_hours.sort(key=lambda x: x["start"])
 
-        # Cluster sessions separated by <= 150 minutes, deduct idle gaps > 45 minutes
+        # Cluster sessions separated by <= 150 minutes
         clusters = []
         current_cluster = [after_hours[0]]
 
@@ -227,7 +235,6 @@ def process_daily_overtime(intervals: list) -> list:
         # Apply 30-minute payroll increment rounding
         payroll_hours = round_payroll_hours(raw_hours)
 
-        # Synthesize Kranias-style short lowercase justifications
         choice_a, choice_b = synthesize_justifications(apps_seen, titles_seen, is_weekend)
 
         results.append({
@@ -248,20 +255,17 @@ def synthesize_justifications(apps: set, titles: list, is_weekend: bool) -> tupl
     """Generate concise, project-attributed, Kranias-style lowercase justifications."""
     text_corpus = " ".join(titles).lower()
 
-    # Detect high-priority meetings
     meeting_match = None
     if "teams" in apps or "meeting" in text_corpus or "call" in text_corpus:
         for t in titles:
             t_low = t.lower()
             if any(k in t_low for k in ["sync", "alignment", "catchup", "review", "uat", "standup"]):
-                # Extract clean meeting phrase
                 clean = re.sub(r"[^a-zA-Z0-9\s]", " ", t_low)
                 words = clean.split()
                 if len(words) >= 2:
                     meeting_match = " ".join(words[:4])
                     break
 
-    # Project detection
     project = "architecture"
     if "biometric" in text_corpus or "ekyc" in text_corpus:
         project = "biometrics"
@@ -354,7 +358,6 @@ def main():
     if args.start_date:
         start_date = datetime.datetime.strptime(args.start_date, "%Y-%m-%d").date()
     else:
-        # Default to first day of current month
         start_date = today.replace(day=1)
 
     if args.end_date:
@@ -362,8 +365,10 @@ def main():
     else:
         end_date = today
 
-    start_dt = datetime.datetime.combine(start_date, datetime.time.min)
-    end_dt = datetime.datetime.combine(end_date, datetime.time.max)
+    # Combine with local time bounds, then extract_telemetry converts to UTC
+    tz = datetime.datetime.now().astimezone().tzinfo
+    start_dt = datetime.datetime.combine(start_date, datetime.time.min, tzinfo=tz)
+    end_dt = datetime.datetime.combine(end_date, datetime.time.max, tzinfo=tz)
 
     db_path = Path(args.screenpipe_db).expanduser()
     intervals = extract_telemetry(db_path, start_dt, end_dt)
@@ -380,7 +385,6 @@ def main():
 
     total_hours = sum(r["payroll_hours"] for r in results)
 
-    # Print Markdown Summary
     print("\n### ⏱️ Overtime Audit Summary")
     print(f"- **Audited Span**: {start_date} to {end_date}")
     print(f"- **Active Overtime Days**: {len(results)}")
@@ -393,7 +397,6 @@ def main():
         span = f"{r['start_time']} - {r['end_time']}"
         print(f"| {d_str} | {r['day_name']} | {span} | {r['payroll_hours']:.1f}h | {r['choice_a']} | {r['choice_b']} |")
 
-    # Generate Excel on Desktop if requested or default
     desktop_dir = Path.home() / "Desktop"
     month_name = start_date.strftime("%B")
     year_str = start_date.strftime("%Y")
@@ -401,7 +404,6 @@ def main():
 
     export_workbook(results, excel_path)
 
-    # Stage to macOS clipboard
     if not args.no_clipboard:
         stage_to_clipboard(results)
 
