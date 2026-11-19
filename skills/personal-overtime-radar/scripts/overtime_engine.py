@@ -73,6 +73,18 @@ def parse_arguments() -> argparse.Namespace:
         help="Employee ID for payroll claims",
     )
     parser.add_argument(
+        "--employee-name",
+        type=str,
+        default="Panagiotis Koletsos",
+        help="Employee Name for payroll claims",
+    )
+    parser.add_argument(
+        "--append-to",
+        type=str,
+        default=None,
+        help="Path to existing NEW_Overtimes_Technology.xlsx to append/update rows into",
+    )
+    parser.add_argument(
         "--force-office",
         action="store_true",
         help="Treat all audited days as in-office days",
@@ -713,24 +725,34 @@ def process_daily_overtime(
     return results
 
 
-def export_workbook(results: list, output_path: Path, employee_id: str = "SHN000191"):
-    """Write results to professionally styled Excel workbook (.xlsx) matching exact Date, Day, Overtime, Reason columns."""
+def export_workbook(
+    results: list,
+    output_path: Path,
+    employee_id: str = "SHN000191",
+    employee_name: str = "Panagiotis Koletsos",
+):
+    """Write results to Excel workbook matching the exact format of NEW_Overtimes_Technology.xlsx."""
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
     wb = openpyxl.Workbook()
 
-    # Sheet 1: Exact requested deliverable columns (Date, Day, Overtime, Reason)
-    ws_main = wb.active
-    ws_main.title = "Overtime"
+    # Sheet 1: Sheet1 (SN List, Name List)
+    ws_list = wb.active
+    ws_list.title = "Sheet1"
+    ws_list.append(["SN (List)", "Name (list)"])
+    ws_list.append([employee_id, employee_name])
+    ws_list.views.sheetView[0].showGridLines = True
+
+    # Sheet 2: Sheet2 (The primary overtime tracking sheet matching company template)
+    ws_main = wb.create_sheet(title="Sheet2")
     ws_main.views.sheetView[0].showGridLines = True
 
-    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="1F2937", end_color="1F2937", fill_type="solid")
-    center_align = Alignment(horizontal="center", vertical="center")
-    left_align = Alignment(horizontal="left", vertical="center")
-    right_align = Alignment(horizontal="right", vertical="center")
+    font_guidance = Font(name="Aptos Narrow", size=11, bold=False)
+    font_header = Font(name="Aptos Narrow", size=11, bold=True)
+    font_data = Font(name="Aptos Narrow", size=11, bold=False)
+    font_formula = Font(name="Calibri", size=11, bold=False)
 
     thin_border = Border(
         left=Side(style="thin", color="D1D5DB"),
@@ -739,51 +761,98 @@ def export_workbook(results: list, output_path: Path, employee_id: str = "SHN000
         bottom=Side(style="thin", color="D1D5DB"),
     )
 
-    headers = ["Date", "Day", "Overtime", "Reason"]
-    ws_main.append(headers)
-    for col_idx in range(1, len(headers) + 1):
-        cell = ws_main.cell(row=1, column=col_idx)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = center_align
+    # Row 1: Guidance text exactly from company template
+    guidance_row = [
+        None,
+        "Select the name from the list",
+        "Enter the date in this order: day-month- year",
+        "The day will be automatically filled",
+        "Fill- in the extra hours of work for that day",
+        "Provide justification for the extra hours of work",
+    ]
+    ws_main.append(guidance_row)
+    for col_idx in range(1, 7):
+        c = ws_main.cell(row=1, column=col_idx)
+        c.font = font_guidance
+        c.border = thin_border
 
-    for r_idx, row in enumerate(results, start=2):
+    # Row 2: Headers exactly from company template
+    headers = ["SN", "Name", "Date", "Day", "Hours of Extra Work", "Justification"]
+    ws_main.append(headers)
+    for col_idx in range(1, 7):
+        c = ws_main.cell(row=2, column=col_idx)
+        c.font = font_header
+        c.border = thin_border
+        if col_idx in (1, 2, 3, 4):
+            c.alignment = Alignment(horizontal="center", vertical="center")
+        elif col_idx == 5:
+            c.alignment = Alignment(horizontal="right", vertical="center")
+        else:
+            c.alignment = Alignment(horizontal="left", vertical="center")
+
+    # Rows 3+: Data rows
+    for r_idx, row in enumerate(results, start=3):
+        d_val = datetime.datetime.combine(row["date"], datetime.time.min)
+        formula = f'=IF(C{r_idx}<>0,CHOOSE(WEEKDAY(C{r_idx},1),"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")," ")'
         ws_main.append([
-            row["date"].strftime("%d/%m/%Y"),
-            row["day_name"],
+            employee_id,
+            employee_name,
+            d_val,
+            formula,
             row["payroll_hours"],
             row["reason"],
         ])
-        for col_idx in range(1, len(headers) + 1):
+        for col_idx in range(1, 7):
             c = ws_main.cell(row=r_idx, column=col_idx)
             c.border = thin_border
             if col_idx in (1, 2):
-                c.alignment = center_align
+                c.font = font_data
+                c.alignment = Alignment(horizontal="left", vertical="center")
             elif col_idx == 3:
-                c.alignment = right_align
+                c.font = font_data
+                c.alignment = Alignment(horizontal="center", vertical="center")
+                c.number_format = "mm-dd-yy"
+            elif col_idx == 4:
+                c.font = font_formula
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            elif col_idx == 5:
+                c.font = font_data
+                c.alignment = Alignment(horizontal="right", vertical="center")
                 c.number_format = "0.0"
-            else:
-                c.alignment = left_align
+            elif col_idx == 6:
+                c.font = font_data
+                c.alignment = Alignment(horizontal="left", vertical="center")
 
-    # Total Row
-    last_row = len(results) + 2
-    ws_main.cell(row=last_row, column=1, value="Total")
-    total_cell = ws_main.cell(row=last_row, column=3, value=f"=SUM(C2:C{last_row - 1})")
-    total_cell.number_format = "0.0"
-    total_font = Font(name="Calibri", size=11, bold=True)
-    ws_main.cell(row=last_row, column=1).font = total_font
-    total_cell.font = total_font
+    # Total row at bottom
+    total_row = len(results) + 3
+    ws_main.cell(row=total_row, column=1, value="Total").font = font_header
+    ws_main.cell(row=total_row, column=1).border = thin_border
+    for c_i in (2, 3, 4, 6):
+        ws_main.cell(row=total_row, column=c_i).border = thin_border
+    total_hours_cell = ws_main.cell(row=total_row, column=5, value=f"=SUM(E3:E{total_row - 1})")
+    total_hours_cell.font = font_header
+    total_hours_cell.border = thin_border
+    total_hours_cell.alignment = Alignment(horizontal="right", vertical="center")
+    total_hours_cell.number_format = "0.0"
 
-    # Sheet 2: Audit Breakdown (Auditability with Location, Spans, Raw Hours)
+    # Set exact column widths matching NEW_Overtimes_Technology.xlsx
+    ws_main.column_dimensions["A"].width = 12.0
+    ws_main.column_dimensions["B"].width = 20.0
+    ws_main.column_dimensions["C"].width = 14.0
+    ws_main.column_dimensions["D"].width = 14.0
+    ws_main.column_dimensions["E"].width = 18.0
+    ws_main.column_dimensions["F"].width = 60.0
+
+    # Sheet 3: Audit Breakdown (for forensic engineering verification)
     ws_audit = wb.create_sheet(title="Audit Breakdown")
     ws_audit.views.sheetView[0].showGridLines = True
     audit_headers = ["Date", "Day", "Location", "Active Span", "Raw Hours", "Payroll Hours", "Reason"]
     ws_audit.append(audit_headers)
     for col_idx in range(1, len(audit_headers) + 1):
-        cell = ws_audit.cell(row=1, column=col_idx)
-        cell.font = header_font
-        cell.fill = PatternFill(start_color="374151", end_color="374151", fill_type="solid")
-        cell.alignment = center_align
+        c = ws_audit.cell(row=1, column=col_idx)
+        c.font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        c.fill = PatternFill(start_color="374151", end_color="374151", fill_type="solid")
+        c.alignment = Alignment(horizontal="center", vertical="center")
 
     for r_idx, row in enumerate(results, start=2):
         ws_audit.append([
@@ -799,41 +868,138 @@ def export_workbook(results: list, output_path: Path, employee_id: str = "SHN000
             c = ws_audit.cell(row=r_idx, column=col_idx)
             c.border = thin_border
             if col_idx in (1, 2, 4):
-                c.alignment = center_align
+                c.alignment = Alignment(horizontal="center", vertical="center")
             elif col_idx in (5, 6):
-                c.alignment = right_align
+                c.alignment = Alignment(horizontal="right", vertical="center")
                 c.number_format = "0.0"
             else:
-                c.alignment = left_align
+                c.alignment = Alignment(horizontal="left", vertical="center")
 
-    # Auto-fit column widths on both sheets
-    for ws in [ws_main, ws_audit]:
-        for col in ws.columns:
-            max_len = max(len(str(cell.value or "")) for cell in col)
-            col_letter = get_column_letter(col[0].column)
-            ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+    for col in ws_audit.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        col_letter = get_column_letter(col[0].column)
+        ws_audit.column_dimensions[col_letter].width = max(max_len + 4, 12)
 
     output_path = output_path.with_suffix(".xlsx")
     wb.save(str(output_path))
     print(f"Excel workbook generated: {output_path}")
 
 
-def stage_to_clipboard(results: list):
-    """Stage tab-separated rows directly into macOS pbcopy."""
+def append_to_existing_workbook(
+    existing_path: Path,
+    results: list,
+    start_date: datetime.date,
+    end_date: datetime.date,
+    employee_id: str = "SHN000191",
+    employee_name: str = "Panagiotis Koletsos",
+) -> Path:
+    """Append or update audited overtime rows directly into an existing NEW_Overtimes_Technology.xlsx workbook."""
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, Border, Side
+    import shutil
+
+    if not existing_path.exists():
+        print(f"Notice: Workbook to append to not found: {existing_path}")
+        return None
+
+    # Backup original before modifying
+    backup_path = existing_path.with_suffix(".xlsx.bak")
+    shutil.copy2(existing_path, backup_path)
+
+    wb = openpyxl.load_workbook(str(existing_path))
+    sheet_name = "Sheet2" if "Sheet2" in wb.sheetnames else wb.sheetnames[0]
+    ws = wb[sheet_name]
+
+    font_data = Font(name="Aptos Narrow", size=11, bold=False)
+    font_formula = Font(name="Calibri", size=11, bold=False)
+    thin_border = Border(
+        left=Side(style="thin", color="D1D5DB"),
+        right=Side(style="thin", color="D1D5DB"),
+        top=Side(style="thin", color="D1D5DB"),
+        bottom=Side(style="thin", color="D1D5DB"),
+    )
+
+    audit_dict = {r["date"]: r for r in results}
+
+    # Index existing rows for this employee
+    existing_employee_rows = []
+    for r in range(3, ws.max_row + 1):
+        sn = ws.cell(row=r, column=1).value
+        dt = ws.cell(row=r, column=3).value
+        if sn == employee_id and dt:
+            d_val = dt.date() if hasattr(dt, "date") else dt
+            hours = ws.cell(row=r, column=5).value
+            just = ws.cell(row=r, column=6).value
+            existing_employee_rows.append((r, d_val, hours, just))
+
+    # Entries outside this audited month (e.g. September) are left completely untouched
+    other_month_entries = [item for item in existing_employee_rows if not (start_date <= item[1] <= end_date)]
+    audited_month_existing = {item[1]: (item[2], item[3]) for item in existing_employee_rows if (start_date <= item[1] <= end_date)}
+
+    # Merge: audited results take precedence for verified dates; preserve earlier manual entries if any
+    merged_month_dates = sorted(set(audit_dict.keys()) | set(audited_month_existing.keys()))
+
+    # First row for the audited month starts right after other_month_entries
+    if existing_employee_rows:
+        first_row_idx = min(item[0] for item in existing_employee_rows) + len(other_month_entries)
+    else:
+        first_row_idx = 3
+        while ws.cell(row=first_row_idx, column=1).value is not None:
+            first_row_idx += 1
+
+    curr_r = first_row_idx
+    for d in merged_month_dates:
+        if d in audit_dict:
+            h = audit_dict[d]["payroll_hours"]
+            reason = audit_dict[d]["reason"]
+        else:
+            h = audited_month_existing[d][0]
+            reason = audited_month_existing[d][1]
+
+        d_val = datetime.datetime.combine(d, datetime.time.min)
+        formula = f'=IF(C{curr_r}<>0,CHOOSE(WEEKDAY(C{curr_r},1),"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")," ")'
+
+        ws.cell(row=curr_r, column=1, value=employee_id).font = font_data
+        ws.cell(row=curr_r, column=2, value=employee_name).font = font_data
+        c_date = ws.cell(row=curr_r, column=3, value=d_val)
+        c_date.font = font_data
+        c_date.number_format = "mm-dd-yy"
+        ws.cell(row=curr_r, column=4, value=formula).font = font_formula
+        c_h = ws.cell(row=curr_r, column=5, value=h)
+        c_h.font = font_data
+        c_h.number_format = "0.0"
+        ws.cell(row=curr_r, column=6, value=reason).font = font_data
+
+        for c_i in range(1, 7):
+            ws.cell(row=curr_r, column=c_i).border = thin_border
+
+        curr_r += 1
+
+    wb.save(str(existing_path))
+    print(f"Master workbook updated: {existing_path} ({len(merged_month_dates)} rows synchronized, backup at {backup_path})")
+    return existing_path
+
+
+def stage_to_clipboard(
+    results: list,
+    employee_id: str = "SHN000191",
+    employee_name: str = "Panagiotis Koletsos",
+):
+    """Stage tab-separated rows directly into macOS pbcopy matching NEW_Overtimes_Technology.xlsx layout."""
     tsv_lines = []
     for r in results:
         date_str = r["date"].strftime("%d/%m/%Y")
         day_str = r["day_name"]
         hours_str = f"{r['payroll_hours']:.1f}"
         reason = r["reason"]
-        tsv_lines.append(f"{date_str}\t{day_str}\t{hours_str}\t{reason}")
+        tsv_lines.append(f"{employee_id}\t{employee_name}\t{date_str}\t{day_str}\t{hours_str}\t{reason}")
 
     tsv_data = "\n".join(tsv_lines)
 
     try:
         proc = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
         proc.communicate(input=tsv_data.encode("utf-8"))
-        print(f"Staged {len(results)} rows into macOS clipboard (pbcopy). Ready for paste.")
+        print(f"Staged {len(results)} rows into macOS clipboard (pbcopy) matching NEW_Overtimes_Technology.xlsx layout. Ready for paste.")
     except Exception as e:
         print(f"Warning: Could not copy to pbcopy: {e}", file=sys.stderr)
 
@@ -905,21 +1071,49 @@ def main():
     print(f"- **Active Overtime Days**: {len(results)} ({office_count} Office, {remote_count} Remote)")
     print(f"- **Total Overtime Hours**: {total_hours:.1f}h\n")
 
-    print("| Date | Day | Overtime | Reason |")
-    print("| :--- | :--- | :--- | :--- |")
+    print("| SN | Name | Date | Day | Hours of Extra Work | Justification |")
+    print("| :--- | :--- | :--- | :--- | :--- | :--- |")
     for r in results:
         d_str = r["date"].strftime("%d/%m/%Y")
-        print(f"| {d_str} | {r['day_name']} | {r['payroll_hours']:.1f}h | {r['reason']} |")
+        print(f"| {args.employee_id} | {args.employee_name} | {d_str} | {r['day_name']} | {r['payroll_hours']:.1f}h | {r['reason']} |")
 
     desktop_dir = Path.home() / "Desktop"
     month_name = start_date.strftime("%B")
     year_str = start_date.strftime("%Y")
     excel_path = Path(args.output_excel).expanduser() if args.output_excel else desktop_dir / f"SNAPPI_{month_name}_{year_str}_Overtime.xlsx"
 
-    export_workbook(results, excel_path, employee_id=args.employee_id)
+    export_workbook(
+        results,
+        excel_path,
+        employee_id=args.employee_id,
+        employee_name=args.employee_name,
+    )
+
+    # Determine workbook to append into (if specified or present in Downloads)
+    target_append = None
+    if args.append_to:
+        target_append = Path(args.append_to).expanduser()
+    else:
+        downloads_master = Path.home() / "Downloads" / "NEW_Overtimes_Technology.xlsx"
+        if downloads_master.exists():
+            target_append = downloads_master
+
+    if target_append and target_append.exists():
+        append_to_existing_workbook(
+            target_append,
+            results,
+            start_date=start_date,
+            end_date=end_date,
+            employee_id=args.employee_id,
+            employee_name=args.employee_name,
+        )
 
     if not args.no_clipboard:
-        stage_to_clipboard(results)
+        stage_to_clipboard(
+            results,
+            employee_id=args.employee_id,
+            employee_name=args.employee_name,
+        )
 
 
 if __name__ == "__main__":

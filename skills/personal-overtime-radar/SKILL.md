@@ -1,7 +1,7 @@
 ---
 name: personal-overtime-radar
 description: Audit, calculate, and reconcile personal engineering and architecture overtime across local macOS telemetry, Screenpipe activity intervals, power logs, Git commits, network presence, and calendar feeds.
-version: 0.2.0
+version: 0.2.1
 status: draft
 ---
 
@@ -62,29 +62,37 @@ Perform an end-to-end audit, forensic reconciliation, and payroll-ready formatti
    - If an after-hours meeting occurred (Teams call, design sync), prioritize the meeting as the primary justification.
    - If the session was coding or solo architecture, name the specific project deliverable (e.g. `kyc reliance`, `payments`, `cards`, `biometrics`).
 
-5. **Workbook Staging & Clipboard Transfer**:
-   - Generate a local Excel workbook on the user's Desktop (`~/Desktop/SNAPPI_<Month>_<Year>_Overtime.xlsx`) containing active dates, location, hours, and justification choices.
-   - Load the tab-delimited (TSV) rows directly into the macOS system clipboard using `pbcopy` so the user can paste directly into the live company SharePoint workbook in one keystroke (`Cmd+V`).
+5. **Workbook Staging, Master Template Synchronization & Clipboard Transfer**:
+   - Generate a local Excel deliverable on the user's Desktop (`~/Desktop/SNAPPI_<Month>_<Year>_Overtime.xlsx`) strictly matching the company template (`NEW_Overtimes_Technology.xlsx`):
+     - `Sheet1`: Employee lookup list (`SN (List)`, `Name (list)`).
+     - `Sheet2`: Exact 6-column structure (`SN`, `Name`, `Date`, `Day`, `Hours of Extra Work`, `Justification`), Row 1 guidance, Row 2 headers, Day formula `=IF(C{r}<>0,CHOOSE(WEEKDAY(C{r},1),"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")," ")`, Aptos Narrow font, thin borders, and bottom `=SUM()` row.
+     - `Audit Breakdown`: Detailed engineering audit trail (Date, Day, Location, Active Span, Raw Hours, Payroll Hours, Reason).
+   - If `~/Downloads/NEW_Overtimes_Technology.xlsx` (or `--append-to <path>`) is present:
+     - Automatically creates a `.bak` backup.
+     - Synchronizes/merges the audited month chronologically starting at the employee's block.
+     - Preserves all earlier months (e.g. September) and earlier manual entries without data loss.
+   - Load the tab-delimited (TSV) rows directly into the macOS system clipboard using `pbcopy` matching all 6 columns (`SN\tName\tDate\tDay\tHours of Extra Work\tJustification`) so the user can paste directly into SharePoint in one keystroke (`Cmd+V`).
 
 ## Output Format
 Render the audit findings using this structured markdown layout:
 
 ```markdown
 ### ⏱️ Overtime Audit Summary: <Date Range>
-- **Total Days Audited**: `<count>`
+- **Audited Span**: `<Start>` to `<End>`
 - **Active Overtime Days**: `<count>` (`<office_count>` Office, `<remote_count>` Remote)
 - **Total Overtime Hours**: `<total>h`
 
 ### 📋 Reconciled Overtime Breakdown
 
-| Date | Day | Location | Active Span | Net Hours | Choice A (Priority) | Choice B (Alternative) |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| DD/MM/YYYY | Wed | 🏢 Office (Corporate Hub) | 17:00 - 20:54 | 4.0h | office alignment kyc reliance | hld sync kyc reliance |
-| DD/MM/YYYY | Fri | 🏠 Remote | 16:30 - 20:00 | 3.5h | uat testing alignment | release verification |
+| SN | Name | Date | Day | Hours of Extra Work | Justification |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| SHN000191 | Panagiotis Koletsos | DD/MM/YYYY | Thu | 0.5h | snappi x vodafone epay payments mechanism |
+| SHN000191 | Panagiotis Koletsos | DD/MM/YYYY | Mon | 2.0h | epay payments integration natech discussion |
 
 ### 🚀 Staged Deliverables
-- **Desktop Workbook**: `~/Desktop/SNAPPI_<Month>_<Year>_Overtime.xlsx`
-- **Clipboard Status**: Loaded into macOS clipboard (`pbcopy`). Ready to paste into SharePoint.
+- **Desktop Deliverable**: `~/Desktop/SNAPPI_<Month>_<Year>_Overtime.xlsx`
+- **Master Workbook**: `~/Downloads/NEW_Overtimes_Technology.xlsx` (synchronized with backup at `.bak`)
+- **Clipboard Status**: Staged in macOS clipboard (`pbcopy`). Ready for `Cmd+V` in SharePoint.
 ```
 
 ## Rules
