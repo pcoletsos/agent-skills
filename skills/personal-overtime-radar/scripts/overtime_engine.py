@@ -34,6 +34,14 @@ KNOWN_OFFICE_SSIDS = {
 }
 
 
+PASSIVE_BACKGROUND_APPS = {
+    "qualys cloud agent",
+    "loginwindow",
+    "usernotificationcenter",
+    "controlcenter",
+}
+
+
 def get_default_screenpipe_path() -> Path:
     return Path.home() / ".screenpipe" / "db.sqlite"
 
@@ -248,6 +256,9 @@ def extract_telemetry(db_path: Path, start_dt: datetime.datetime, end_dt: dateti
             (start_iso, end_iso),
         )
         for row in cursor.fetchall():
+            app_name = row["app_name"] or ""
+            if app_name.lower() in PASSIVE_BACKGROUND_APPS:
+                continue
             start_local = parse_iso(row["start_at"]).astimezone()
             end_local = parse_iso(row["end_at"]).astimezone()
             duration = (end_local - start_local).total_seconds()
@@ -255,7 +266,7 @@ def extract_telemetry(db_path: Path, start_dt: datetime.datetime, end_dt: dateti
                 "start": start_local,
                 "end": end_local,
                 "duration": max(0.0, duration),
-                "app": row["app_name"] or "",
+                "app": app_name,
                 "title": row["title"] or "",
             })
     elif "frames" in tables:
@@ -269,12 +280,15 @@ def extract_telemetry(db_path: Path, start_dt: datetime.datetime, end_dt: dateti
             (start_iso, end_iso),
         )
         for row in cursor.fetchall():
+            app_name = row["app_name"] or ""
+            if app_name.lower() in PASSIVE_BACKGROUND_APPS:
+                continue
             ts_local = parse_iso(row["timestamp"]).astimezone()
             intervals.append({
                 "start": ts_local,
                 "end": ts_local + datetime.timedelta(seconds=10),
                 "duration": 10.0,
-                "app": row["app_name"] or "",
+                "app": app_name,
                 "title": row["window_name"] or "",
             })
 
