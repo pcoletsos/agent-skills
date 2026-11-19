@@ -88,6 +88,12 @@ def parse_arguments() -> argparse.Namespace:
         default=str(Path.home() / "repos"),
         help="Path to local repositories root for Git activity corroboration",
     )
+    parser.add_argument(
+        "--vault-root",
+        type=str,
+        default=str(Path.home() / "repos" / "SNAPPI" / "snappi-2-brain"),
+        help="Path to snappi-2-brain vault for meeting and transcript context",
+    )
     return parser.parse_args()
 
 
@@ -382,6 +388,109 @@ def extract_pmset_sleep_timestamps(start_date: datetime.date, end_date: datetime
     return sleep_by_date
 
 
+def load_meeting_context(vault_root: Path) -> dict:
+    """Load meeting titles and projects by date from 05_MEETINGS/ledger/."""
+    ledger_dir = vault_root / "05_MEETINGS" / "ledger"
+    meetings = {}
+    if not ledger_dir.exists():
+        return meetings
+
+    for p in ledger_dir.glob("2026-*.md"):
+        try:
+            text = p.read_text(encoding="utf-8", errors="ignore")
+            d_m = re.search(r"^date:\s*([0-9]{4}-[0-9]{2}-[0-9]{2})", text, re.M)
+            if d_m:
+                d = datetime.date.fromisoformat(d_m.group(1))
+            else:
+                try:
+                    d = datetime.date.fromisoformat(p.stem[:10])
+                except Exception:
+                    continue
+
+            t_m = re.search(r"^title:\s*(.+)$", text, re.M)
+            if t_m:
+                title = t_m.group(1).strip().strip('"\'')
+            else:
+                title = p.stem[11:].replace("-", " ")
+
+            p_m = re.search(r"^project:\s*(.+)$", text, re.M)
+            proj = p_m.group(1).strip() if p_m else None
+            if proj in ("null", "-", "none", ""):
+                proj = None
+
+            meetings.setdefault(d, []).append({
+                "title": title,
+                "project": proj,
+            })
+        except Exception:
+            pass
+    return meetings
+
+
+def synthesize_reason(
+    day_date: datetime.date,
+    apps: set,
+    titles: list,
+    is_weekend: bool,
+    is_office: bool = False,
+    day_meetings: list = None,
+) -> str:
+    """Synthesize high-importance practitioner reason from meetings, transcripts, and engineering activity."""
+    if day_meetings:
+        def score_m(m_item):
+            t = m_item["title"].lower()
+            score = 0
+            if any(k in t for k in [
+                "security hardening", "security sign off", "ananke", "proof of address", "epay",
+                "payments walkthrough", "payments mechanism", "installments", "settlements",
+                "vouchers change request", "api deliverables", "mvp prioritization",
+                "data anonymization", "subscription bundles", "payments api blocked"
+            ]):
+                score += 25
+            elif any(k in t for k in ["walkthrough", "solution", "architecture", "infosec", "payments", "vouchers", "open points"]):
+                score += 15
+            elif "vodafone flex" in t or "vf flex" in t:
+                score += 10
+            elif "alignment" in t or "sync" in t:
+                score += 5
+            if "meal vouchers alignment" in t:
+                score -= 8
+            if any(k in t for k in ["standup", "stand up", "daily sync", "daily stand up"]):
+                score -= 10
+            return score
+
+        sorted_m = sorted(day_meetings, key=score_m, reverse=True)
+        best = sorted_m[0]["title"]
+        clean = re.sub(r"[^a-zA-Z0-9\s-]", " ", best).strip().lower()
+        clean = " ".join(clean.split())
+        clean = clean.replace("vodafone flex passages of the one-to-one call on the ", "")
+        clean = clean.replace("vodafone flex passages of three calls of 26 october 2026", "vodafone flex mobile architecture and strategic portfolio sync")
+        clean = clean.replace("snappi x vodafone x epay ", "snappi x vodafone epay ")
+        if clean:
+            return clean
+
+    # Fallback to Screenpipe & Git titles
+    text_corpus = " ".join(titles).lower()
+    if "recipe" in text_corpus or "kyc" in text_corpus:
+        return "onboarding journey recipe and repository synchronization"
+    elif "task" in text_corpus or "taskctl" in text_corpus:
+        return "weekend task engine roadmap and runtime architecture design"
+    elif "confluence" in text_corpus or "spec" in text_corpus:
+        return "weekend architecture spec audit and confluence tech docs sync"
+    elif "incident" in text_corpus or "friends" in text_corpus:
+        return "weekend service delivery incident triage and pilot sync"
+    elif "payment" in text_corpus:
+        return "weekend payments walkthrough and settlement reconciliation design"
+    elif "meal vouchers" in text_corpus or "voucher" in text_corpus:
+        return "meal vouchers solution alignment and cards architecture review"
+    elif is_weekend:
+        return "weekend architecture review and spec reconciliation"
+    elif is_office:
+        return "on-site architecture alignment and delivery sync"
+    else:
+        return "architecture delivery and specification sync"
+
+
 def synthesize_justifications(apps: set, titles: list, is_weekend: bool, is_office: bool = False) -> tuple:
     """Generate concise, project-attributed, Kranias-style lowercase justifications."""
     text_corpus = " ".join(titles).lower()
@@ -434,6 +543,7 @@ def process_daily_overtime(
     intervals: list,
     office_days: dict,
     evening_sleeps: dict = None,
+    meetings_by_date: dict = None,
 ) -> list:
     """
     Group intervals by day, apply contract boundaries, office detection, and calculate net hours.
@@ -569,6 +679,8 @@ def process_daily_overtime(
             payroll_hours = round_payroll_hours(raw_hours, is_office=False)
             location_tag = "🏠 Remote"
 
+        day_m = meetings_by_date.get(day_date, []) if meetings_by_date else None
+        reason = synthesize_reason(day_date, apps_seen, titles_seen, is_weekend, is_office, day_m)
         choice_a, choice_b = synthesize_justifications(apps_seen, titles_seen, is_weekend, is_office)
 
         results.append({
@@ -580,6 +692,7 @@ def process_daily_overtime(
             "end_time": last_session_end.strftime("%H:%M"),
             "raw_hours": raw_hours,
             "payroll_hours": payroll_hours,
+            "reason": reason,
             "choice_a": choice_a,
             "choice_b": choice_b,
         })
@@ -588,17 +701,17 @@ def process_daily_overtime(
 
 
 def export_workbook(results: list, output_path: Path, employee_id: str = "SHN000191"):
-    """Write results to professionally styled Excel workbook (.xlsx) with Audit Breakdown and SharePoint Ready sheets."""
+    """Write results to professionally styled Excel workbook (.xlsx) matching exact Date, Day, Overtime, Reason columns."""
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
     wb = openpyxl.Workbook()
 
-    # Sheet 1: Detailed Audit Breakdown
-    ws_audit = wb.active
-    ws_audit.title = "Audit Breakdown"
-    ws_audit.views.sheetView[0].showGridLines = True
+    # Sheet 1: Exact requested deliverable columns (Date, Day, Overtime, Reason)
+    ws_main = wb.active
+    ws_main.title = "Overtime"
+    ws_main.views.sheetView[0].showGridLines = True
 
     header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="1F2937", end_color="1F2937", fill_type="solid")
@@ -613,12 +726,50 @@ def export_workbook(results: list, output_path: Path, employee_id: str = "SHN000
         bottom=Side(style="thin", color="D1D5DB"),
     )
 
-    headers = ["Date", "Day", "Location", "Span", "Raw Hours", "Payroll Hours", "Choice A (Priority)", "Choice B (Alternative)"]
-    ws_audit.append(headers)
+    headers = ["Date", "Day", "Overtime", "Reason"]
+    ws_main.append(headers)
     for col_idx in range(1, len(headers) + 1):
-        cell = ws_audit.cell(row=1, column=col_idx)
+        cell = ws_main.cell(row=1, column=col_idx)
         cell.font = header_font
         cell.fill = header_fill
+        cell.alignment = center_align
+
+    for r_idx, row in enumerate(results, start=2):
+        ws_main.append([
+            row["date"].strftime("%d/%m/%Y"),
+            row["day_name"],
+            row["payroll_hours"],
+            row["reason"],
+        ])
+        for col_idx in range(1, len(headers) + 1):
+            c = ws_main.cell(row=r_idx, column=col_idx)
+            c.border = thin_border
+            if col_idx in (1, 2):
+                c.alignment = center_align
+            elif col_idx == 3:
+                c.alignment = right_align
+                c.number_format = "0.0"
+            else:
+                c.alignment = left_align
+
+    # Total Row
+    last_row = len(results) + 2
+    ws_main.cell(row=last_row, column=1, value="Total")
+    total_cell = ws_main.cell(row=last_row, column=3, value=f"=SUM(C2:C{last_row - 1})")
+    total_cell.number_format = "0.0"
+    total_font = Font(name="Calibri", size=11, bold=True)
+    ws_main.cell(row=last_row, column=1).font = total_font
+    total_cell.font = total_font
+
+    # Sheet 2: Audit Breakdown (Auditability with Location, Spans, Raw Hours)
+    ws_audit = wb.create_sheet(title="Audit Breakdown")
+    ws_audit.views.sheetView[0].showGridLines = True
+    audit_headers = ["Date", "Day", "Location", "Active Span", "Raw Hours", "Payroll Hours", "Reason"]
+    ws_audit.append(audit_headers)
+    for col_idx in range(1, len(audit_headers) + 1):
+        cell = ws_audit.cell(row=1, column=col_idx)
+        cell.font = header_font
+        cell.fill = PatternFill(start_color="374151", end_color="374151", fill_type="solid")
         cell.alignment = center_align
 
     for r_idx, row in enumerate(results, start=2):
@@ -629,10 +780,9 @@ def export_workbook(results: list, output_path: Path, employee_id: str = "SHN000
             f"{row['start_time']} - {row['end_time']}",
             round(row["raw_hours"], 2),
             row["payroll_hours"],
-            row["choice_a"],
-            row["choice_b"],
+            row["reason"],
         ])
-        for col_idx in range(1, len(headers) + 1):
+        for col_idx in range(1, len(audit_headers) + 1):
             c = ws_audit.cell(row=r_idx, column=col_idx)
             c.border = thin_border
             if col_idx in (1, 2, 4):
@@ -643,53 +793,13 @@ def export_workbook(results: list, output_path: Path, employee_id: str = "SHN000
             else:
                 c.alignment = left_align
 
-    # Total Row
-    last_row = len(results) + 2
-    ws_audit.cell(row=last_row, column=1, value="Total")
-    total_cell = ws_audit.cell(row=last_row, column=6, value=f"=SUM(F2:F{last_row - 1})")
-    total_cell.number_format = "0.0"
-    total_font = Font(name="Calibri", size=11, bold=True)
-    ws_audit.cell(row=last_row, column=1).font = total_font
-    total_cell.font = total_font
-
-    # Sheet 2: SharePoint Ready (Exact structure for NEW_Overtimes_Technology.xlsx)
-    ws_sp = wb.create_sheet(title="SharePoint Ready")
-    ws_sp.views.sheetView[0].showGridLines = True
-    sp_headers = ["Employee ID", "Date", "Hours", "Justification", "Location"]
-    ws_sp.append(sp_headers)
-    for col_idx in range(1, len(sp_headers) + 1):
-        cell = ws_sp.cell(row=1, column=col_idx)
-        cell.font = header_font
-        cell.fill = PatternFill(start_color="0369A1", end_color="0369A1", fill_type="solid")
-        cell.alignment = center_align
-
-    for r_idx, row in enumerate(results, start=2):
-        ws_sp.append([
-            employee_id,
-            row["date"].strftime("%d/%m/%Y"),
-            row["payroll_hours"],
-            row["choice_a"],
-            row["location"],
-        ])
-        for col_idx in range(1, len(sp_headers) + 1):
-            c = ws_sp.cell(row=r_idx, column=col_idx)
-            c.border = thin_border
-            if col_idx in (1, 2):
-                c.alignment = center_align
-            elif col_idx == 3:
-                c.alignment = right_align
-                c.number_format = "0.0"
-            else:
-                c.alignment = left_align
-
     # Auto-fit column widths on both sheets
-    for ws in [ws_audit, ws_sp]:
+    for ws in [ws_main, ws_audit]:
         for col in ws.columns:
             max_len = max(len(str(cell.value or "")) for cell in col)
             col_letter = get_column_letter(col[0].column)
-            ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+            ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
 
-    # Save directly to .xlsx
     output_path = output_path.with_suffix(".xlsx")
     wb.save(str(output_path))
     print(f"Excel workbook generated: {output_path}")
@@ -700,16 +810,17 @@ def stage_to_clipboard(results: list):
     tsv_lines = []
     for r in results:
         date_str = r["date"].strftime("%d/%m/%Y")
+        day_str = r["day_name"]
         hours_str = f"{r['payroll_hours']:.1f}"
-        justification = r["choice_a"]
-        tsv_lines.append(f"{date_str}\t{hours_str}\t{justification}")
+        reason = r["reason"]
+        tsv_lines.append(f"{date_str}\t{day_str}\t{hours_str}\t{reason}")
 
     tsv_data = "\n".join(tsv_lines)
 
     try:
         proc = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
         proc.communicate(input=tsv_data.encode("utf-8"))
-        print(f"Staged {len(results)} rows into macOS clipboard (pbcopy). Ready for Cmd+V in SharePoint.")
+        print(f"Staged {len(results)} rows into macOS clipboard (pbcopy). Ready for paste.")
     except Exception as e:
         print(f"Warning: Could not copy to pbcopy: {e}", file=sys.stderr)
 
@@ -758,11 +869,15 @@ def main():
     # Extract evening departure sleep timestamps from pmset
     evening_sleeps = extract_pmset_sleep_timestamps(start_date, end_date)
 
+    # Load meeting context from vault
+    vault_root = Path(args.vault_root).expanduser()
+    meetings_by_date = load_meeting_context(vault_root)
+
     if not intervals and not evening_sleeps:
         print(f"No activity intervals or telemetry found between {start_date} and {end_date}.")
         return
 
-    results = process_daily_overtime(intervals, office_days, evening_sleeps)
+    results = process_daily_overtime(intervals, office_days, evening_sleeps, meetings_by_date)
 
     if not results:
         print(f"No qualifying overtime sessions found between {start_date} and {end_date}.")
@@ -777,12 +892,11 @@ def main():
     print(f"- **Active Overtime Days**: {len(results)} ({office_count} Office, {remote_count} Remote)")
     print(f"- **Total Overtime Hours**: {total_hours:.1f}h\n")
 
-    print("| Date | Day | Location | Span | Hours | Choice A (Priority) | Choice B (Alternative) |")
-    print("| :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
+    print("| Date | Day | Overtime | Reason |")
+    print("| :--- | :--- | :--- | :--- |")
     for r in results:
         d_str = r["date"].strftime("%d/%m/%Y")
-        span = f"{r['start_time']} - {r['end_time']}"
-        print(f"| {d_str} | {r['day_name']} | {r['location']} | {span} | {r['payroll_hours']:.1f}h | {r['choice_a']} | {r['choice_b']} |")
+        print(f"| {d_str} | {r['day_name']} | {r['payroll_hours']:.1f}h | {r['reason']} |")
 
     desktop_dir = Path.home() / "Desktop"
     month_name = start_date.strftime("%B")
