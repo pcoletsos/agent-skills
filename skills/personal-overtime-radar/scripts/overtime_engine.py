@@ -587,44 +587,112 @@ def process_daily_overtime(
     return results
 
 
-def export_workbook(results: list, output_path: Path):
-    """Write results to Excel (.xlsx) using openpyxl if available, or TSV fallback."""
-    try:
-        import openpyxl
+def export_workbook(results: list, output_path: Path, employee_id: str = "SHN000191"):
+    """Write results to professionally styled Excel workbook (.xlsx) with Audit Breakdown and SharePoint Ready sheets."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
 
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Overtime"
+    wb = openpyxl.Workbook()
 
-        headers = ["Date", "Day", "Location", "Span", "Raw Hours", "Payroll Hours", "Choice A", "Choice B"]
-        ws.append(headers)
+    # Sheet 1: Detailed Audit Breakdown
+    ws_audit = wb.active
+    ws_audit.title = "Audit Breakdown"
+    ws_audit.views.sheetView[0].showGridLines = True
 
-        for row in results:
-            ws.append([
-                row["date"].strftime("%d/%m/%Y"),
-                row["day_name"],
-                row["location"],
-                f"{row['start_time']} - {row['end_time']}",
-                round(row["raw_hours"], 2),
-                row["payroll_hours"],
-                row["choice_a"],
-                row["choice_b"],
-            ])
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1F2937", end_color="1F2937", fill_type="solid")
+    center_align = Alignment(horizontal="center", vertical="center")
+    left_align = Alignment(horizontal="left", vertical="center")
+    right_align = Alignment(horizontal="right", vertical="center")
 
-        wb.save(str(output_path))
-        print(f"Excel workbook generated: {output_path}")
-    except ImportError:
-        tsv_path = output_path.with_suffix(".tsv")
-        with open(tsv_path, "w", encoding="utf-8") as f:
-            f.write("Date\tDay\tLocation\tSpan\tRaw Hours\tPayroll Hours\tChoice A\tChoice B\n")
-            for row in results:
-                f.write(
-                    f"{row['date'].strftime('%d/%m/%Y')}\t{row['day_name']}\t{row['location']}\t"
-                    f"{row['start_time']} - {row['end_time']}\t"
-                    f"{round(row['raw_hours'], 2)}\t{row['payroll_hours']}\t"
-                    f"{row['choice_a']}\t{row['choice_b']}\n"
-                )
-        print(f"openpyxl not installed. Saved TSV fallback: {tsv_path}")
+    thin_border = Border(
+        left=Side(style="thin", color="D1D5DB"),
+        right=Side(style="thin", color="D1D5DB"),
+        top=Side(style="thin", color="D1D5DB"),
+        bottom=Side(style="thin", color="D1D5DB"),
+    )
+
+    headers = ["Date", "Day", "Location", "Span", "Raw Hours", "Payroll Hours", "Choice A (Priority)", "Choice B (Alternative)"]
+    ws_audit.append(headers)
+    for col_idx in range(1, len(headers) + 1):
+        cell = ws_audit.cell(row=1, column=col_idx)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = center_align
+
+    for r_idx, row in enumerate(results, start=2):
+        ws_audit.append([
+            row["date"].strftime("%d/%m/%Y"),
+            row["day_name"],
+            row["location"],
+            f"{row['start_time']} - {row['end_time']}",
+            round(row["raw_hours"], 2),
+            row["payroll_hours"],
+            row["choice_a"],
+            row["choice_b"],
+        ])
+        for col_idx in range(1, len(headers) + 1):
+            c = ws_audit.cell(row=r_idx, column=col_idx)
+            c.border = thin_border
+            if col_idx in (1, 2, 4):
+                c.alignment = center_align
+            elif col_idx in (5, 6):
+                c.alignment = right_align
+                c.number_format = "0.0"
+            else:
+                c.alignment = left_align
+
+    # Total Row
+    last_row = len(results) + 2
+    ws_audit.cell(row=last_row, column=1, value="Total")
+    total_cell = ws_audit.cell(row=last_row, column=6, value=f"=SUM(F2:F{last_row - 1})")
+    total_cell.number_format = "0.0"
+    total_font = Font(name="Calibri", size=11, bold=True)
+    ws_audit.cell(row=last_row, column=1).font = total_font
+    total_cell.font = total_font
+
+    # Sheet 2: SharePoint Ready (Exact structure for NEW_Overtimes_Technology.xlsx)
+    ws_sp = wb.create_sheet(title="SharePoint Ready")
+    ws_sp.views.sheetView[0].showGridLines = True
+    sp_headers = ["Employee ID", "Date", "Hours", "Justification", "Location"]
+    ws_sp.append(sp_headers)
+    for col_idx in range(1, len(sp_headers) + 1):
+        cell = ws_sp.cell(row=1, column=col_idx)
+        cell.font = header_font
+        cell.fill = PatternFill(start_color="0369A1", end_color="0369A1", fill_type="solid")
+        cell.alignment = center_align
+
+    for r_idx, row in enumerate(results, start=2):
+        ws_sp.append([
+            employee_id,
+            row["date"].strftime("%d/%m/%Y"),
+            row["payroll_hours"],
+            row["choice_a"],
+            row["location"],
+        ])
+        for col_idx in range(1, len(sp_headers) + 1):
+            c = ws_sp.cell(row=r_idx, column=col_idx)
+            c.border = thin_border
+            if col_idx in (1, 2):
+                c.alignment = center_align
+            elif col_idx == 3:
+                c.alignment = right_align
+                c.number_format = "0.0"
+            else:
+                c.alignment = left_align
+
+    # Auto-fit column widths on both sheets
+    for ws in [ws_audit, ws_sp]:
+        for col in ws.columns:
+            max_len = max(len(str(cell.value or "")) for cell in col)
+            col_letter = get_column_letter(col[0].column)
+            ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+
+    # Save directly to .xlsx
+    output_path = output_path.with_suffix(".xlsx")
+    wb.save(str(output_path))
+    print(f"Excel workbook generated: {output_path}")
 
 
 def stage_to_clipboard(results: list):
@@ -721,7 +789,7 @@ def main():
     year_str = start_date.strftime("%Y")
     excel_path = Path(args.output_excel).expanduser() if args.output_excel else desktop_dir / f"SNAPPI_{month_name}_{year_str}_Overtime.xlsx"
 
-    export_workbook(results, excel_path)
+    export_workbook(results, excel_path, employee_id=args.employee_id)
 
     if not args.no_clipboard:
         stage_to_clipboard(results)
