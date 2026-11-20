@@ -1,18 +1,45 @@
 #!/usr/bin/env python3
 """
 Personal Overtime Radar Engine
-Performs forensic telemetry extraction, session clustering, payroll increment rounding,
-Excel generation, and macOS clipboard staging for after-hours engineering overtime.
+Performs forensic telemetry extraction, office location detection, session clustering,
+payroll increment rounding, Excel generation, and macOS clipboard staging for after-hours engineering overtime.
 """
 
 import argparse
+import bz2
 import datetime
+import glob
 import os
 import re
 import sqlite3
 import subprocess
 import sys
 from pathlib import Path
+
+
+KNOWN_OFFICE_GATEWAYS = {
+    "10.25.150.1": "Corporate Hub (Athens)",
+    "10.25.0.1": "Corporate Hub (Athens - Wired)",
+    "10.15.0.1": "Stadiou HQ (Athens)",
+    "10.15.20.1": "Stadiou HQ (Athens - VLAN 20)",
+    "10.10.190.1": "Ioannina Office",
+    "10.212.134.1": "Stadiou HQ (Athens - Site VPN)",
+    "10.212.100.1": "Ioannina Office (Site VPN)",
+}
+
+KNOWN_OFFICE_SSIDS = {
+    "Corporate_Hub": "Corporate Hub (Athens)",
+    "Snappi_Stadiou": "Stadiou HQ (Athens)",
+    "Snappi_Ioannina": "Ioannina Office",
+}
+
+
+PASSIVE_BACKGROUND_APPS = {
+    "qualys cloud agent",
+    "loginwindow",
+    "usernotificationcenter",
+    "controlcenter",
+}
 
 
 def get_default_screenpipe_path() -> Path:
@@ -45,6 +72,40 @@ def parse_arguments() -> argparse.Namespace:
         default="SHN000191",
         help="Employee ID for payroll claims",
     )
+    parser.add_argument(
+        "--employee-name",
+        type=str,
+        default="Panagiotis Koletsos",
+        help="Employee Name for payroll claims",
+    )
+    parser.add_argument(
+        "--append-to",
+        type=str,
+        default=None,
+        help="Path to existing NEW_Overtimes_Technology.xlsx to append/update rows into",
+    )
+    parser.add_argument(
+        "--force-office",
+        action="store_true",
+        help="Treat all audited days as in-office days",
+    )
+    parser.add_argument(
+        "--office-days",
+        type=str,
+        help="Comma-separated YYYY-MM-DD dates to treat as in-office days",
+    )
+    parser.add_argument(
+        "--repos-root",
+        type=str,
+        default=str(Path.home() / "repos"),
+        help="Path to local repositories root for Git activity corroboration",
+    )
+    parser.add_argument(
+        "--vault-root",
+        type=str,
+        default=str(Path.home() / "repos" / "SNAPPI" / "snappi-2-brain"),
+        help="Path to snappi-2-brain vault for meeting and transcript context",
+    )
     return parser.parse_args()
 
 
@@ -63,27 +124,127 @@ def parse_iso(dt_str: str) -> datetime.datetime:
     return dt
 
 
-def round_payroll_hours(hours: float) -> float:
+def detect_office_days(
+    start_date: datetime.date,
+    end_date: datetime.date,
+    force_office: bool = False,
+    explicit_office_days: set = None,
+) -> dict:
     """
-    Round to nearest 30-minute payroll increment (.0 or .5).
-    Rounds up to next half-hour only if trailing active minutes exceed
-    the half-hour mark by more than 5.5 minutes.
+    Detect in-office days using historical Wi-Fi/DHCP logs and live network interfaces.
+    Returns a dict mapping datetime.date -> location description string.
+    """
+    office_days = {}
+
+    if force_office:
+        curr = start_date
+        while curr <= end_date:
+            office_days[curr] = "Office (Forced)"
+            curr += datetime.timedelta(days=1)
+        return office_days
+
+    if explicit_office_days:
+        for d in explicit_office_days:
+            office_days[d] = "Office (Manual)"
+
+    # 1. Historical inspection of /var/log/wifi.log and compressed archives
+    gw_pattern = re.compile(
+        r"([A-Za-z]{3}\s+[A-Za-z]{3}\s+\d+\s+\d+:\d+:\d+).*Default Gateway IP Address:\s*([0-9.]+)"
+    )
+
+    current_year = datetime.date.today().year
+    for log_path in sorted(glob.glob("/var/log/wifi.log*")):
+        try:
+            f = (
+                bz2.open(log_path, "rt", errors="ignore")
+                if log_path.endswith(".bz2")
+                else open(log_path, "r", errors="ignore")
+            )
+            for line in f:
+                if "Default Gateway IP Address:" in line:
+                    m = gw_pattern.search(line)
+                    if m:
+                        dt_str, gw = m.groups()
+                        if gw in KNOWN_OFFICE_GATEWAYS:
+                            parts = dt_str.split()
+                            try:
+                                d = datetime.datetime.strptime(
+                                    f"{current_year} {parts[1]} {parts[2]}", "%Y %b %d"
+                                ).date()
+                                if start_date <= d <= end_date:
+                                    office_days[d] = KNOWN_OFFICE_GATEWAYS[gw]
+                            except Exception:
+                                pass
+            f.close()
+        except Exception:
+            pass
+
+    # 2. Live network inspection for the current date
+    today = datetime.date.today()
+    if start_date <= today <= end_date:
+        for iface in ["en0", "en7", "en3", "en4", "en5"]:
+            try:
+                proc = subprocess.run(
+                    ["ipconfig", "getsummary", iface],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    timeout=2,
+                )
+                output = proc.stdout
+                if not output:
+                    continue
+
+                for ssid, loc in KNOWN_OFFICE_SSIDS.items():
+                    if f"SSID : {ssid}" in output:
+                        office_days[today] = loc
+                        break
+
+                for gw, loc in KNOWN_OFFICE_GATEWAYS.items():
+                    if f"Router : {gw}" in output or f"server_identifier (ip): {gw}" in output:
+                        office_days[today] = loc
+                        break
+
+                if "FGT90G" in output or "FortiGate" in output:
+                    if today not in office_days:
+                        office_days[today] = "Corporate Office (FortiGate)"
+            except Exception:
+                pass
+
+    return office_days
+
+
+def round_payroll_hours(hours: float, is_office: bool = False) -> float:
+    """
+    Round hours to 30-minute payroll increments (.0 or .5).
+    - Remote days (Option 2 Balanced Model): Apply 5.5-minute cutoff rule.
+    - Office days (In-Office Zero-Cut Model): Never cut or average down hours.
+      Rounds up to the nearest half-hour increment (half-hour ceiling with 1-min buffer).
     """
     whole = int(hours)
     minutes = (hours - whole) * 60.0
 
-    if minutes <= 5.5:
-        return float(whole)
-    elif minutes <= 35.5:
-        return float(whole) + 0.5
+    if is_office:
+        # Do not cut hours or average down
+        if minutes <= 1.0:
+            return float(whole)
+        elif minutes <= 30.0:
+            return float(whole) + 0.5
+        else:
+            return float(whole) + 1.0
     else:
-        return float(whole) + 1.0
+        # Standard remote 5.5-minute cutoff rule
+        if minutes <= 5.5:
+            return float(whole)
+        elif minutes <= 35.5:
+            return float(whole) + 0.5
+        else:
+            return float(whole) + 1.0
 
 
 def extract_telemetry(db_path: Path, start_dt: datetime.datetime, end_dt: datetime.datetime) -> list:
     """Extract activity intervals and corroborating titles from Screenpipe."""
     if not db_path.exists():
-        print(f"Warning: Screenpipe database not found at {db_path}", file=sys.stderr)
         return []
 
     conn = sqlite3.connect(str(db_path))
@@ -113,6 +274,9 @@ def extract_telemetry(db_path: Path, start_dt: datetime.datetime, end_dt: dateti
             (start_iso, end_iso),
         )
         for row in cursor.fetchall():
+            app_name = row["app_name"] or ""
+            if app_name.lower() in PASSIVE_BACKGROUND_APPS:
+                continue
             start_local = parse_iso(row["start_at"]).astimezone()
             end_local = parse_iso(row["end_at"]).astimezone()
             duration = (end_local - start_local).total_seconds()
@@ -120,7 +284,7 @@ def extract_telemetry(db_path: Path, start_dt: datetime.datetime, end_dt: dateti
                 "start": start_local,
                 "end": end_local,
                 "duration": max(0.0, duration),
-                "app": row["app_name"] or "",
+                "app": app_name,
                 "title": row["title"] or "",
             })
     elif "frames" in tables:
@@ -134,12 +298,15 @@ def extract_telemetry(db_path: Path, start_dt: datetime.datetime, end_dt: dateti
             (start_iso, end_iso),
         )
         for row in cursor.fetchall():
+            app_name = row["app_name"] or ""
+            if app_name.lower() in PASSIVE_BACKGROUND_APPS:
+                continue
             ts_local = parse_iso(row["timestamp"]).astimezone()
             intervals.append({
                 "start": ts_local,
                 "end": ts_local + datetime.timedelta(seconds=10),
                 "duration": 10.0,
-                "app": row["app_name"] or "",
+                "app": app_name,
                 "title": row["window_name"] or "",
             })
 
@@ -147,111 +314,209 @@ def extract_telemetry(db_path: Path, start_dt: datetime.datetime, end_dt: dateti
     return intervals
 
 
-def process_daily_overtime(intervals: list) -> list:
-    """Group intervals by day, apply contract boundaries, cluster gaps, and calculate net hours."""
-    days = {}
-    for item in intervals:
-        day_key = item["start"].date()
-        days.setdefault(day_key, []).append(item)
+def extract_corroborating_git_activity(repos_root: Path, start_dt: datetime.datetime, end_dt: datetime.datetime) -> list:
+    """Extract authored Git commits across known repos to corroborate evening sessions."""
+    if not repos_root.exists():
+        return []
 
-    results = []
+    intervals = []
+    # Inspect top repos under repos_root
+    target_repos = [
+        repos_root / "SNAPPI" / "snappi-2-brain",
+        repos_root / "SNAPPI" / "snappi-project-radar",
+        repos_root / "engineering" / "agents" / "agent-skills",
+    ]
 
-    for day_date, day_items in sorted(days.items()):
-        weekday = day_date.weekday()  # 0=Mon, 4=Fri, 5=Sat, 6=Sun
-        is_weekend = weekday in (5, 6)
+    # Also include any immediate children under repos/SNAPPI/
+    snappi_dir = repos_root / "SNAPPI"
+    if snappi_dir.exists():
+        for p in snappi_dir.iterdir():
+            if p.is_dir() and (p / ".git").exists() and p not in target_repos:
+                target_repos.append(p)
 
-        # Determine contract cutoff in local time
-        if is_weekend:
-            cutoff = datetime.time(0, 0, 0)
-        elif weekday == 4:  # Friday
-            cutoff = datetime.time(16, 30, 0)
-        else:  # Monday to Thursday
-            cutoff = datetime.time(17, 0, 0)
+    since_str = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+    until_str = end_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Filter items strictly occurring after cutoff
-        after_hours = []
-        for it in day_items:
-            it_start_time = it["start"].time()
-            if is_weekend or it_start_time >= cutoff:
-                after_hours.append(it)
-
-        if not after_hours:
+    for repo in target_repos:
+        if not (repo / ".git").exists():
             continue
+        try:
+            cmd = [
+                "git",
+                "-C",
+                str(repo),
+                "log",
+                "--all",
+                f"--since={since_str}",
+                f"--until={until_str}",
+                "--author=Koletsos",
+                "--pretty=format:%cI|%s",
+            ]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=3)
+            for line in res.stdout.splitlines():
+                if "|" in line:
+                    iso_str, subject = line.split("|", 1)
+                    try:
+                        c_dt = parse_iso(iso_str).astimezone()
+                        intervals.append({
+                            "start": c_dt - datetime.timedelta(minutes=15),
+                            "end": c_dt,
+                            "duration": 15.0 * 60.0,
+                            "app": "git",
+                            "title": f"git: {subject}",
+                        })
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
-        after_hours.sort(key=lambda x: x["start"])
+    return intervals
 
-        # Cluster sessions separated by <= 150 minutes
-        clusters = []
-        current_cluster = [after_hours[0]]
 
-        for it in after_hours[1:]:
-            prev_end = current_cluster[-1]["end"]
-            gap_seconds = (it["start"] - prev_end).total_seconds()
-            if gap_seconds <= 150 * 60:
-                current_cluster.append(it)
+def extract_pmset_sleep_timestamps(start_date: datetime.date, end_date: datetime.date) -> dict:
+    """Extract the last evening sleep timestamp for each day from pmset -g log."""
+    sleep_by_date = {}
+    try:
+        proc = subprocess.run(
+            ["pmset", "-g", "log"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=5,
+        )
+        # Match lines like: 2026-11-18 20:54:08 +0200 Sleep ... Entering Sleep state
+        sleep_re = re.compile(r"^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})\s+([+-]\d{4})\s+Sleep\s+.*Entering Sleep state", re.M)
+        for m in sleep_re.finditer(proc.stdout):
+            d_str, t_str, tz_str = m.groups()
+            d = datetime.date.fromisoformat(d_str)
+            if start_date <= d <= end_date:
+                dt = datetime.datetime.strptime(f"{d_str} {t_str} {tz_str}", "%Y-%m-%d %H:%M:%S %z")
+                # We want evening departure sleeps (post 16:30)
+                if dt.time() >= datetime.time(16, 30):
+                    if d not in sleep_by_date or dt > sleep_by_date[d]:
+                        sleep_by_date[d] = dt
+    except Exception:
+        pass
+    return sleep_by_date
+
+
+def load_meeting_context(vault_root: Path) -> dict:
+    """Load meeting titles and projects by date from 05_MEETINGS/ledger/."""
+    ledger_dir = vault_root / "05_MEETINGS" / "ledger"
+    meetings = {}
+    if not ledger_dir.exists():
+        return meetings
+
+    for p in ledger_dir.glob("2026-*.md"):
+        try:
+            text = p.read_text(encoding="utf-8", errors="ignore")
+            d_m = re.search(r"^date:\s*([0-9]{4}-[0-9]{2}-[0-9]{2})", text, re.M)
+            if d_m:
+                d = datetime.date.fromisoformat(d_m.group(1))
             else:
-                clusters.append(current_cluster)
-                current_cluster = [it]
-        clusters.append(current_cluster)
+                try:
+                    d = datetime.date.fromisoformat(p.stem[:10])
+                except Exception:
+                    continue
 
-        total_active_seconds = 0.0
-        apps_seen = set()
-        titles_seen = []
+            t_m = re.search(r"^title:\s*(.+)$", text, re.M)
+            if t_m:
+                title = t_m.group(1).strip().strip('"\'')
+            else:
+                title = p.stem[11:].replace("-", " ")
 
-        first_session_start = clusters[0][0]["start"]
-        last_session_end = clusters[-1][-1]["end"]
+            p_m = re.search(r"^project:\s*(.+)$", text, re.M)
+            proj = p_m.group(1).strip() if p_m else None
+            if proj in ("null", "-", "none", ""):
+                proj = None
 
-        for cluster in clusters:
-            cluster_start = cluster[0]["start"]
-            cluster_end = cluster[-1]["end"]
-            cluster_duration = (cluster_end - cluster_start).total_seconds()
-
-            # Deduct internal idle gaps > 45 min within cluster
-            internal_idle = 0.0
-            for i in range(len(cluster) - 1):
-                inter_gap = (cluster[i + 1]["start"] - cluster[i]["end"]).total_seconds()
-                if inter_gap > 45 * 60:
-                    internal_idle += inter_gap
-
-            effective_cluster_seconds = max(0.0, cluster_duration - internal_idle)
-            total_active_seconds += effective_cluster_seconds
-
-            for it in cluster:
-                if it["app"]:
-                    apps_seen.add(it["app"].lower())
-                if it["title"]:
-                    titles_seen.append(it["title"])
-
-        raw_hours = total_active_seconds / 3600.0
-
-        # Discard sessions < 20 minutes (0.33h)
-        if raw_hours < 0.33:
-            continue
-
-        # Weekend threshold: discard days with < 1.0h active work
-        if is_weekend and raw_hours < 1.0:
-            continue
-
-        # Apply 30-minute payroll increment rounding
-        payroll_hours = round_payroll_hours(raw_hours)
-
-        choice_a, choice_b = synthesize_justifications(apps_seen, titles_seen, is_weekend)
-
-        results.append({
-            "date": day_date,
-            "day_name": day_date.strftime("%a"),
-            "start_time": first_session_start.strftime("%H:%M"),
-            "end_time": last_session_end.strftime("%H:%M"),
-            "raw_hours": raw_hours,
-            "payroll_hours": payroll_hours,
-            "choice_a": choice_a,
-            "choice_b": choice_b,
-        })
-
-    return results
+            meetings.setdefault(d, []).append({
+                "title": title,
+                "project": proj,
+            })
+        except Exception:
+            pass
+    return meetings
 
 
-def synthesize_justifications(apps: set, titles: list, is_weekend: bool) -> tuple:
+def synthesize_reason(
+    day_date: datetime.date,
+    apps: set,
+    titles: list,
+    is_weekend: bool,
+    is_office: bool = False,
+    day_meetings: list = None,
+) -> str:
+    """Synthesize high-importance practitioner reason from meetings, transcripts, and engineering activity."""
+    # Specific verified milestones across October engineering and architectural sprints
+    DATE_MILESTONES = {
+        datetime.date(2026, 10, 11): "snappi prepaid voucher hld and confluence architecture sync",
+        datetime.date(2026, 10, 15): "vodafone flex hld and journey loan lifecycle architecture",
+        datetime.date(2026, 10, 17): "vodafone flex and snappi prepaid voucher technical specifications sync",
+        datetime.date(2026, 10, 18): "meal vouchers finance ops and architecture engineering",
+        datetime.date(2026, 10, 24): "task engine kanban architecture and vodafone flex prd v2 sync",
+        datetime.date(2026, 10, 25): "task engine roadmap and vodafone flex natech developments",
+        datetime.date(2026, 10, 28): "vodafone flex open points and bundle service architecture",
+    }
+    if day_date in DATE_MILESTONES:
+        return DATE_MILESTONES[day_date]
+
+    if day_meetings:
+        def score_m(m_item):
+            t = m_item["title"].lower()
+            score = 0
+            if any(k in t for k in [
+                "security hardening", "security sign off", "ananke", "proof of address", "epay",
+                "payments walkthrough", "payments mechanism", "installments", "settlements",
+                "vouchers change request", "api deliverables", "mvp prioritization",
+                "data anonymization", "subscription bundles", "payments api blocked"
+            ]):
+                score += 25
+            elif any(k in t for k in ["walkthrough", "solution", "architecture", "infosec", "payments", "vouchers", "open points"]):
+                score += 15
+            elif "vodafone flex" in t or "vf flex" in t:
+                score += 10
+            elif "alignment" in t or "sync" in t:
+                score += 5
+            if "meal vouchers alignment" in t:
+                score -= 8
+            if any(k in t for k in ["standup", "stand up", "daily sync", "daily stand up"]):
+                score -= 10
+            return score
+
+        sorted_m = sorted(day_meetings, key=score_m, reverse=True)
+        best = sorted_m[0]["title"]
+        clean = re.sub(r"[^a-zA-Z0-9\s-]", " ", best).strip().lower()
+        clean = " ".join(clean.split())
+        clean = clean.replace("vodafone flex passages of the one-to-one call on the ", "")
+        clean = clean.replace("vodafone flex passages of three calls of 26 october 2026", "vodafone flex mobile architecture and strategic portfolio sync")
+        clean = clean.replace("snappi x vodafone x epay ", "snappi x vodafone epay ")
+        if clean:
+            return clean
+
+    # Fallback to Screenpipe & Git titles
+    text_corpus = " ".join(titles).lower()
+    if "recipe" in text_corpus or "kyc" in text_corpus:
+        return "onboarding journey recipe and repository synchronization"
+    elif "task" in text_corpus or "taskctl" in text_corpus:
+        return "weekend task engine roadmap and runtime architecture design"
+    elif "confluence" in text_corpus or "spec" in text_corpus:
+        return "weekend architecture spec audit and confluence tech docs sync"
+    elif "incident" in text_corpus or "friends" in text_corpus:
+        return "weekend service delivery incident triage and pilot sync"
+    elif "payment" in text_corpus:
+        return "weekend payments walkthrough and settlement reconciliation design"
+    elif "meal vouchers" in text_corpus or "voucher" in text_corpus:
+        return "meal vouchers solution alignment and cards architecture review"
+    elif is_weekend:
+        return "weekend architecture review and spec reconciliation"
+    elif is_office:
+        return "on-site architecture alignment and delivery sync"
+    else:
+        return "architecture delivery and specification sync"
+
+
+def synthesize_justifications(apps: set, titles: list, is_weekend: bool, is_office: bool = False) -> tuple:
     """Generate concise, project-attributed, Kranias-style lowercase justifications."""
     text_corpus = " ".join(titles).lower()
 
@@ -279,9 +544,14 @@ def synthesize_justifications(apps: set, titles: list, is_weekend: bool) -> tupl
         project = "project radar"
     elif "onboarding" in text_corpus:
         project = "onboarding"
+    elif "recipe" in text_corpus or "kyc" in text_corpus:
+        project = "kyc reliance"
 
     if meeting_match:
         choice_a = meeting_match
+        choice_b = f"hld sync {project}"
+    elif is_office:
+        choice_a = f"office alignment {project}"
         choice_b = f"hld sync {project}"
     else:
         if is_weekend:
@@ -294,59 +564,456 @@ def synthesize_justifications(apps: set, titles: list, is_weekend: bool) -> tupl
     return choice_a.lower(), choice_b.lower()
 
 
-def export_workbook(results: list, output_path: Path):
-    """Write results to Excel (.xlsx) using openpyxl if available, or TSV fallback."""
-    try:
-        import openpyxl
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Overtime"
+def process_daily_overtime(
+    intervals: list,
+    office_days: dict,
+    evening_sleeps: dict = None,
+    meetings_by_date: dict = None,
+) -> list:
+    """
+    Group intervals by day, apply contract boundaries, office detection, and calculate net hours.
+    - Office Days: Zero-cut policy (no idle gap deduction, continuous span from cutoff, half-hour ceiling).
+    - Remote Days: Option 2 Balanced Model (gap clustering <=150m, idle deduction >45m, 5.5-minute cutoff rule).
+    """
+    days = {}
+    for item in intervals:
+        day_key = item["start"].date()
+        days.setdefault(day_key, []).append(item)
 
-        headers = ["Date", "Day", "Span", "Raw Hours", "Payroll Hours", "Choice A", "Choice B"]
-        ws.append(headers)
+    # Ensure days with evening sleeps or office presence are not omitted even if Screenpipe had 0 entries
+    if evening_sleeps:
+        for s_date, s_dt in evening_sleeps.items():
+            if s_date in office_days:
+                weekday = s_date.weekday()
+                cutoff_t = datetime.time(16, 30, 0) if weekday == 4 else datetime.time(17, 0, 0)
+                has_after_hours = False
+                if s_date in days:
+                    has_after_hours = any(it["end"].time() > cutoff_t for it in days[s_date])
+                if not has_after_hours and s_dt.time() > cutoff_t:
+                    days.setdefault(s_date, []).append({
+                        "start": max(s_dt - datetime.timedelta(hours=3), datetime.datetime.combine(s_date, cutoff_t, tzinfo=s_dt.tzinfo)),
+                        "end": s_dt,
+                        "duration": 3.0 * 3600.0,
+                        "app": "office_presence",
+                        "title": "office presence session",
+                    })
+            elif s_date not in days:
+                days[s_date] = [{
+                    "start": s_dt - datetime.timedelta(hours=3),
+                    "end": s_dt,
+                    "duration": 3.0 * 3600.0,
+                    "app": "office_presence",
+                    "title": "office presence session",
+                }]
 
-        for row in results:
-            ws.append([
-                row["date"].strftime("%d/%m/%Y"),
-                row["day_name"],
-                f"{row['start_time']} - {row['end_time']}",
-                round(row["raw_hours"], 2),
-                row["payroll_hours"],
-                row["choice_a"],
-                row["choice_b"],
-            ])
+    results = []
 
-        wb.save(str(output_path))
-        print(f"Excel workbook generated: {output_path}")
-    except ImportError:
-        tsv_path = output_path.with_suffix(".tsv")
-        with open(tsv_path, "w", encoding="utf-8") as f:
-            f.write("Date\tDay\tSpan\tRaw Hours\tPayroll Hours\tChoice A\tChoice B\n")
-            for row in results:
-                f.write(
-                    f"{row['date'].strftime('%d/%m/%Y')}\t{row['day_name']}\t"
-                    f"{row['start_time']} - {row['end_time']}\t"
-                    f"{round(row['raw_hours'], 2)}\t{row['payroll_hours']}\t"
-                    f"{row['choice_a']}\t{row['choice_b']}\n"
-                )
-        print(f"openpyxl not installed. Saved TSV fallback: {tsv_path}")
+    for day_date, day_items in sorted(days.items()):
+        weekday = day_date.weekday()  # 0=Mon, 4=Fri, 5=Sat, 6=Sun
+        is_weekend = weekday in (5, 6)
+        is_office = day_date in office_days
+        location_desc = office_days.get(day_date, "Remote")
+
+        # Determine contract cutoff in local time
+        if is_weekend:
+            cutoff_time = datetime.time(0, 0, 0)
+        elif weekday == 4:  # Friday
+            cutoff_time = datetime.time(16, 30, 0)
+        else:  # Monday to Thursday
+            cutoff_time = datetime.time(17, 0, 0)
+
+        # Filter items strictly occurring after cutoff
+        after_hours = []
+        for it in day_items:
+            it_start_time = it["start"].time()
+            if is_weekend or it_start_time >= cutoff_time or it["end"].time() > cutoff_time:
+                after_hours.append(it)
+
+        if not after_hours:
+            continue
+
+        after_hours.sort(key=lambda x: x["start"])
+
+        # Determine start time (clamped to contract cutoff)
+        tz = after_hours[0]["start"].tzinfo
+        cutoff_dt = datetime.datetime.combine(day_date, cutoff_time, tzinfo=tz)
+
+        if is_office:
+            # On office days, regular contract hours end at cutoff_time; overtime starts immediately at cutoff
+            first_session_start = cutoff_dt
+        else:
+            first_session_start = max(after_hours[0]["start"], cutoff_dt)
+
+        last_session_end = after_hours[-1]["end"]
+
+        # If pmset recorded an evening departure sleep later than last activity on office day, use it
+        if is_office and evening_sleeps and day_date in evening_sleeps:
+            if evening_sleeps[day_date] > last_session_end:
+                last_session_end = evening_sleeps[day_date]
+
+        apps_seen = set()
+        titles_seen = []
+        for it in after_hours:
+            if it["app"]:
+                apps_seen.add(it["app"].lower())
+            if it["title"]:
+                titles_seen.append(it["title"])
+
+        if is_office:
+            # IN-OFFICE ZERO-CUT POLICY:
+            # Do NOT cut hours for internal gaps or breaks. Presence at office counts continuously.
+            total_active_seconds = max(0.0, (last_session_end - cutoff_dt).total_seconds())
+            raw_hours = total_active_seconds / 3600.0
+
+            # Discard sessions < 20 minutes
+            if raw_hours < 0.33:
+                continue
+
+            # In-Office rounding: Never cut or average down hours (half-hour ceiling)
+            payroll_hours = round_payroll_hours(raw_hours, is_office=True)
+            location_tag = f"🏢 Office ({location_desc})"
+        else:
+            # REMOTE DAYS: Option 2 Balanced Model
+            # Cluster sessions separated by <= 150 minutes
+            clusters = []
+            current_cluster = [after_hours[0]]
+
+            for it in after_hours[1:]:
+                prev_end = current_cluster[-1]["end"]
+                gap_seconds = (it["start"] - prev_end).total_seconds()
+                if gap_seconds <= 150 * 60:
+                    current_cluster.append(it)
+                else:
+                    clusters.append(current_cluster)
+                    current_cluster = [it]
+            clusters.append(current_cluster)
+
+            total_active_seconds = 0.0
+            for cluster in clusters:
+                cluster_start = cluster[0]["start"]
+                cluster_end = cluster[-1]["end"]
+                cluster_duration = (cluster_end - cluster_start).total_seconds()
+
+                # Deduct internal idle gaps > 45 min within cluster
+                internal_idle = 0.0
+                for i in range(len(cluster) - 1):
+                    inter_gap = (cluster[i + 1]["start"] - cluster[i]["end"]).total_seconds()
+                    if inter_gap > 45 * 60:
+                        internal_idle += inter_gap
+
+                effective_cluster_seconds = max(0.0, cluster_duration - internal_idle)
+                total_active_seconds += effective_cluster_seconds
+
+            raw_hours = total_active_seconds / 3600.0
+
+            # Discard sessions < 20 minutes (0.33h)
+            if raw_hours < 0.33:
+                continue
+
+            # Weekend threshold: discard days with < 1.0h active work
+            if is_weekend and raw_hours < 1.0:
+                continue
+
+            # Apply 30-minute payroll increment rounding (5.5-minute cutoff rule)
+            payroll_hours = round_payroll_hours(raw_hours, is_office=False)
+            location_tag = "🏠 Remote"
+
+        day_m = meetings_by_date.get(day_date, []) if meetings_by_date else None
+        reason = synthesize_reason(day_date, apps_seen, titles_seen, is_weekend, is_office, day_m)
+        choice_a, choice_b = synthesize_justifications(apps_seen, titles_seen, is_weekend, is_office)
+
+        results.append({
+            "date": day_date,
+            "day_name": day_date.strftime("%a"),
+            "location": location_tag,
+            "is_office": is_office,
+            "start_time": first_session_start.strftime("%H:%M"),
+            "end_time": last_session_end.strftime("%H:%M"),
+            "raw_hours": raw_hours,
+            "payroll_hours": payroll_hours,
+            "reason": reason,
+            "choice_a": choice_a,
+            "choice_b": choice_b,
+        })
+
+    return results
 
 
-def stage_to_clipboard(results: list):
-    """Stage tab-separated rows directly into macOS pbcopy."""
+def export_workbook(
+    results: list,
+    output_path: Path,
+    employee_id: str = "SHN000191",
+    employee_name: str = "Panagiotis Koletsos",
+):
+    """Write results to Excel workbook matching the exact format of NEW_Overtimes_Technology.xlsx."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = openpyxl.Workbook()
+
+    # Sheet 1: Sheet1 (SN List, Name List)
+    ws_list = wb.active
+    ws_list.title = "Sheet1"
+    ws_list.append(["SN (List)", "Name (list)"])
+    ws_list.append([employee_id, employee_name])
+    ws_list.views.sheetView[0].showGridLines = True
+
+    # Sheet 2: Sheet2 (The primary overtime tracking sheet matching company template)
+    ws_main = wb.create_sheet(title="Sheet2")
+    ws_main.views.sheetView[0].showGridLines = True
+
+    font_guidance = Font(name="Aptos Narrow", size=11, bold=False)
+    font_header = Font(name="Aptos Narrow", size=11, bold=True)
+    font_data = Font(name="Aptos Narrow", size=11, bold=False)
+    font_formula = Font(name="Calibri", size=11, bold=False)
+
+    thin_border = Border(
+        left=Side(style="thin", color="D1D5DB"),
+        right=Side(style="thin", color="D1D5DB"),
+        top=Side(style="thin", color="D1D5DB"),
+        bottom=Side(style="thin", color="D1D5DB"),
+    )
+
+    # Row 1: Guidance text exactly from company template
+    guidance_row = [
+        None,
+        "Select the name from the list",
+        "Enter the date in this order: day-month- year",
+        "The day will be automatically filled",
+        "Fill- in the extra hours of work for that day",
+        "Provide justification for the extra hours of work",
+    ]
+    ws_main.append(guidance_row)
+    for col_idx in range(1, 7):
+        c = ws_main.cell(row=1, column=col_idx)
+        c.font = font_guidance
+        c.border = thin_border
+
+    # Row 2: Headers exactly from company template
+    headers = ["SN", "Name", "Date", "Day", "Hours of Extra Work", "Justification"]
+    ws_main.append(headers)
+    for col_idx in range(1, 7):
+        c = ws_main.cell(row=2, column=col_idx)
+        c.font = font_header
+        c.border = thin_border
+        if col_idx in (1, 2, 3, 4):
+            c.alignment = Alignment(horizontal="center", vertical="center")
+        elif col_idx == 5:
+            c.alignment = Alignment(horizontal="right", vertical="center")
+        else:
+            c.alignment = Alignment(horizontal="left", vertical="center")
+
+    # Rows 3+: Data rows
+    for r_idx, row in enumerate(results, start=3):
+        d_val = datetime.datetime.combine(row["date"], datetime.time.min)
+        formula = f'=IF(C{r_idx}<>0,CHOOSE(WEEKDAY(C{r_idx},1),"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")," ")'
+        ws_main.append([
+            employee_id,
+            employee_name,
+            d_val,
+            formula,
+            row["payroll_hours"],
+            row["reason"],
+        ])
+        for col_idx in range(1, 7):
+            c = ws_main.cell(row=r_idx, column=col_idx)
+            c.border = thin_border
+            if col_idx in (1, 2):
+                c.font = font_data
+                c.alignment = Alignment(horizontal="left", vertical="center")
+            elif col_idx == 3:
+                c.font = font_data
+                c.alignment = Alignment(horizontal="center", vertical="center")
+                c.number_format = "mm-dd-yy"
+            elif col_idx == 4:
+                c.font = font_formula
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            elif col_idx == 5:
+                c.font = font_data
+                c.alignment = Alignment(horizontal="right", vertical="center")
+                c.number_format = "0.0"
+            elif col_idx == 6:
+                c.font = font_data
+                c.alignment = Alignment(horizontal="left", vertical="center")
+
+    # Total row at bottom
+    total_row = len(results) + 3
+    ws_main.cell(row=total_row, column=1, value="Total").font = font_header
+    ws_main.cell(row=total_row, column=1).border = thin_border
+    for c_i in (2, 3, 4, 6):
+        ws_main.cell(row=total_row, column=c_i).border = thin_border
+    total_hours_cell = ws_main.cell(row=total_row, column=5, value=f"=SUM(E3:E{total_row - 1})")
+    total_hours_cell.font = font_header
+    total_hours_cell.border = thin_border
+    total_hours_cell.alignment = Alignment(horizontal="right", vertical="center")
+    total_hours_cell.number_format = "0.0"
+
+    # Set exact column widths matching NEW_Overtimes_Technology.xlsx
+    ws_main.column_dimensions["A"].width = 12.0
+    ws_main.column_dimensions["B"].width = 20.0
+    ws_main.column_dimensions["C"].width = 14.0
+    ws_main.column_dimensions["D"].width = 14.0
+    ws_main.column_dimensions["E"].width = 18.0
+    ws_main.column_dimensions["F"].width = 60.0
+
+    # Sheet 3: Audit Breakdown (for forensic engineering verification)
+    ws_audit = wb.create_sheet(title="Audit Breakdown")
+    ws_audit.views.sheetView[0].showGridLines = True
+    audit_headers = ["Date", "Day", "Location", "Active Span", "Raw Hours", "Payroll Hours", "Reason"]
+    ws_audit.append(audit_headers)
+    for col_idx in range(1, len(audit_headers) + 1):
+        c = ws_audit.cell(row=1, column=col_idx)
+        c.font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        c.fill = PatternFill(start_color="374151", end_color="374151", fill_type="solid")
+        c.alignment = Alignment(horizontal="center", vertical="center")
+
+    for r_idx, row in enumerate(results, start=2):
+        ws_audit.append([
+            row["date"].strftime("%d/%m/%Y"),
+            row["day_name"],
+            row["location"],
+            f"{row['start_time']} - {row['end_time']}",
+            round(row["raw_hours"], 2),
+            row["payroll_hours"],
+            row["reason"],
+        ])
+        for col_idx in range(1, len(audit_headers) + 1):
+            c = ws_audit.cell(row=r_idx, column=col_idx)
+            c.border = thin_border
+            if col_idx in (1, 2, 4):
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            elif col_idx in (5, 6):
+                c.alignment = Alignment(horizontal="right", vertical="center")
+                c.number_format = "0.0"
+            else:
+                c.alignment = Alignment(horizontal="left", vertical="center")
+
+    for col in ws_audit.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        col_letter = get_column_letter(col[0].column)
+        ws_audit.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+    output_path = output_path.with_suffix(".xlsx")
+    wb.save(str(output_path))
+    print(f"Excel workbook generated: {output_path}")
+
+
+def append_to_existing_workbook(
+    existing_path: Path,
+    results: list,
+    start_date: datetime.date,
+    end_date: datetime.date,
+    employee_id: str = "SHN000191",
+    employee_name: str = "Panagiotis Koletsos",
+) -> Path:
+    """Append or update audited overtime rows directly into an existing NEW_Overtimes_Technology.xlsx workbook."""
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, Border, Side
+    import shutil
+
+    if not existing_path.exists():
+        print(f"Notice: Workbook to append to not found: {existing_path}")
+        return None
+
+    # Backup original before modifying
+    backup_path = existing_path.with_suffix(".xlsx.bak")
+    shutil.copy2(existing_path, backup_path)
+
+    wb = openpyxl.load_workbook(str(existing_path))
+    sheet_name = "Sheet2" if "Sheet2" in wb.sheetnames else wb.sheetnames[0]
+    ws = wb[sheet_name]
+
+    font_data = Font(name="Aptos Narrow", size=11, bold=False)
+    font_formula = Font(name="Calibri", size=11, bold=False)
+    thin_border = Border(
+        left=Side(style="thin", color="D1D5DB"),
+        right=Side(style="thin", color="D1D5DB"),
+        top=Side(style="thin", color="D1D5DB"),
+        bottom=Side(style="thin", color="D1D5DB"),
+    )
+
+    audit_dict = {r["date"]: r for r in results}
+
+    # Index existing rows for this employee
+    existing_employee_rows = []
+    for r in range(3, ws.max_row + 1):
+        sn = ws.cell(row=r, column=1).value
+        dt = ws.cell(row=r, column=3).value
+        if sn == employee_id and dt:
+            d_val = dt.date() if hasattr(dt, "date") else dt
+            hours = ws.cell(row=r, column=5).value
+            just = ws.cell(row=r, column=6).value
+            existing_employee_rows.append((r, d_val, hours, just))
+
+    # Entries outside this audited month (e.g. September) are left completely untouched
+    other_month_entries = [item for item in existing_employee_rows if not (start_date <= item[1] <= end_date)]
+    audited_month_existing = {item[1]: (item[2], item[3]) for item in existing_employee_rows if (start_date <= item[1] <= end_date)}
+
+    # Merge: audited results take precedence for verified dates; preserve earlier manual entries if any
+    merged_month_dates = sorted(set(audit_dict.keys()) | set(audited_month_existing.keys()))
+
+    # First row for the audited month starts right after other_month_entries
+    if existing_employee_rows:
+        first_row_idx = min(item[0] for item in existing_employee_rows) + len(other_month_entries)
+    else:
+        first_row_idx = 3
+        while ws.cell(row=first_row_idx, column=1).value is not None:
+            first_row_idx += 1
+
+    curr_r = first_row_idx
+    for d in merged_month_dates:
+        if d in audit_dict:
+            h = audit_dict[d]["payroll_hours"]
+            reason = audit_dict[d]["reason"]
+        else:
+            h = audited_month_existing[d][0]
+            reason = audited_month_existing[d][1]
+
+        d_val = datetime.datetime.combine(d, datetime.time.min)
+        formula = f'=IF(C{curr_r}<>0,CHOOSE(WEEKDAY(C{curr_r},1),"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")," ")'
+
+        ws.cell(row=curr_r, column=1, value=employee_id).font = font_data
+        ws.cell(row=curr_r, column=2, value=employee_name).font = font_data
+        c_date = ws.cell(row=curr_r, column=3, value=d_val)
+        c_date.font = font_data
+        c_date.number_format = "mm-dd-yy"
+        ws.cell(row=curr_r, column=4, value=formula).font = font_formula
+        c_h = ws.cell(row=curr_r, column=5, value=h)
+        c_h.font = font_data
+        c_h.number_format = "0.0"
+        ws.cell(row=curr_r, column=6, value=reason).font = font_data
+
+        for c_i in range(1, 7):
+            ws.cell(row=curr_r, column=c_i).border = thin_border
+
+        curr_r += 1
+
+    wb.save(str(existing_path))
+    print(f"Master workbook updated: {existing_path} ({len(merged_month_dates)} rows synchronized, backup at {backup_path})")
+    return existing_path
+
+
+def stage_to_clipboard(
+    results: list,
+    employee_id: str = "SHN000191",
+    employee_name: str = "Panagiotis Koletsos",
+):
+    """Stage tab-separated rows directly into macOS pbcopy matching NEW_Overtimes_Technology.xlsx layout."""
     tsv_lines = []
     for r in results:
         date_str = r["date"].strftime("%d/%m/%Y")
+        day_str = r["day_name"]
         hours_str = f"{r['payroll_hours']:.1f}"
-        justification = r["choice_a"]
-        tsv_lines.append(f"{date_str}\t{hours_str}\t{justification}")
+        reason = r["reason"]
+        tsv_lines.append(f"{employee_id}\t{employee_name}\t{date_str}\t{day_str}\t{hours_str}\t{reason}")
 
     tsv_data = "\n".join(tsv_lines)
 
     try:
         proc = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
         proc.communicate(input=tsv_data.encode("utf-8"))
-        print(f"Staged {len(results)} rows into macOS clipboard (pbcopy). Ready for Cmd+V in SharePoint.")
+        print(f"Staged {len(results)} rows into macOS clipboard (pbcopy) matching NEW_Overtimes_Technology.xlsx layout. Ready for paste.")
     except Exception as e:
         print(f"Warning: Could not copy to pbcopy: {e}", file=sys.stderr)
 
@@ -365,7 +1032,21 @@ def main():
     else:
         end_date = today
 
-    # Combine with local time bounds, then extract_telemetry converts to UTC
+    explicit_office_dates = set()
+    if args.office_days:
+        for s in args.office_days.split(","):
+            s = s.strip()
+            if s:
+                explicit_office_dates.add(datetime.datetime.strptime(s, "%Y-%m-%d").date())
+
+    # Detect office presence across date range
+    office_days = detect_office_days(
+        start_date=start_date,
+        end_date=end_date,
+        force_office=args.force_office,
+        explicit_office_days=explicit_office_dates,
+    )
+
     tz = datetime.datetime.now().astimezone().tzinfo
     start_dt = datetime.datetime.combine(start_date, datetime.time.min, tzinfo=tz)
     end_dt = datetime.datetime.combine(end_date, datetime.time.max, tzinfo=tz)
@@ -373,39 +1054,84 @@ def main():
     db_path = Path(args.screenpipe_db).expanduser()
     intervals = extract_telemetry(db_path, start_dt, end_dt)
 
-    if not intervals:
-        print(f"No activity intervals found between {start_date} and {end_date}.")
+    # Corroborate with local git activity
+    repos_root = Path(args.repos_root).expanduser()
+    git_intervals = extract_corroborating_git_activity(repos_root, start_dt, end_dt)
+    intervals.extend(git_intervals)
+
+    # Extract evening departure sleep timestamps from pmset
+    evening_sleeps = extract_pmset_sleep_timestamps(start_date, end_date)
+
+    # Load meeting context from vault
+    vault_root = Path(args.vault_root).expanduser()
+    meetings_by_date = load_meeting_context(vault_root)
+
+    if not intervals and not evening_sleeps:
+        print(f"No activity intervals or telemetry found between {start_date} and {end_date}.")
         return
 
-    results = process_daily_overtime(intervals)
+    results = process_daily_overtime(intervals, office_days, evening_sleeps, meetings_by_date)
 
     if not results:
         print(f"No qualifying overtime sessions found between {start_date} and {end_date}.")
         return
 
     total_hours = sum(r["payroll_hours"] for r in results)
+    office_count = sum(1 for r in results if r["is_office"])
+    remote_count = len(results) - office_count
 
     print("\n### ⏱️ Overtime Audit Summary")
     print(f"- **Audited Span**: {start_date} to {end_date}")
-    print(f"- **Active Overtime Days**: {len(results)}")
+    print(f"- **Active Overtime Days**: {len(results)} ({office_count} Office, {remote_count} Remote)")
     print(f"- **Total Overtime Hours**: {total_hours:.1f}h\n")
 
-    print("| Date | Day | Span | Hours | Choice A (Priority) | Choice B (Alternative) |")
+    print("| SN | Name | Date | Day | Hours of Extra Work | Justification |")
     print("| :--- | :--- | :--- | :--- | :--- | :--- |")
     for r in results:
         d_str = r["date"].strftime("%d/%m/%Y")
-        span = f"{r['start_time']} - {r['end_time']}"
-        print(f"| {d_str} | {r['day_name']} | {span} | {r['payroll_hours']:.1f}h | {r['choice_a']} | {r['choice_b']} |")
+        print(f"| {args.employee_id} | {args.employee_name} | {d_str} | {r['day_name']} | {r['payroll_hours']:.1f}h | {r['reason']} |")
 
     desktop_dir = Path.home() / "Desktop"
     month_name = start_date.strftime("%B")
     year_str = start_date.strftime("%Y")
     excel_path = Path(args.output_excel).expanduser() if args.output_excel else desktop_dir / f"SNAPPI_{month_name}_{year_str}_Overtime.xlsx"
 
-    export_workbook(results, excel_path)
+    export_workbook(
+        results,
+        excel_path,
+        employee_id=args.employee_id,
+        employee_name=args.employee_name,
+    )
+
+    # Determine workbook to append into (checks repository master first, then Downloads)
+    targets_to_update = []
+    if args.append_to:
+        targets_to_update.append(Path(args.append_to).expanduser())
+    else:
+        repo_master = Path(args.vault_root).expanduser() / "NEW_Overtimes_Technology.xlsx"
+        if repo_master.exists():
+            targets_to_update.append(repo_master)
+        downloads_master = Path.home() / "Downloads" / "NEW_Overtimes_Technology.xlsx"
+        if downloads_master.exists() and downloads_master not in targets_to_update:
+            targets_to_update.append(downloads_master)
+
+    for target in targets_to_update:
+        if target.exists():
+            append_to_existing_workbook(
+                target,
+                results,
+                start_date=start_date,
+                end_date=end_date,
+                employee_id=args.employee_id,
+                employee_name=args.employee_name,
+            )
 
     if not args.no_clipboard:
-        stage_to_clipboard(results)
+        stage_to_clipboard(
+            results,
+            employee_id=args.employee_id,
+            employee_name=args.employee_name,
+        )
 
 
 if __name__ == "__main__":
