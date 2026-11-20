@@ -806,6 +806,21 @@ def update_master_workbook(
     print(f"  - Telemetry_Evidence: {len(analyzed_days)} rows recorded")
     print(f"  - Sheet2: {added_to_sheet2} overtime claims updated")
     print(f"  - Backup saved at: {backup_path}")
+
+    # Mirror changes across repo and Downloads copies so user always sees updates
+    mirror_targets = [
+        DEFAULT_MASTER_XLSX,
+        FALLBACK_DOWNLOADS_XLSX,
+        FALLBACK_DOWNLOADS_XLSX_ALT,
+    ]
+    for target in mirror_targets:
+        try:
+            if target.resolve() != wb_path.resolve() and (target.exists() or "Downloads" in str(target)):
+                shutil.copy2(wb_path, target)
+                print(f"  - Synchronized copy to: {target}")
+        except Exception as e:
+            print(f"  - Note: could not sync to {target}: {e}")
+
     return wb_path
 
 
