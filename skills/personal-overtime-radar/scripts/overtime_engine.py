@@ -1089,24 +1089,28 @@ def main():
         employee_name=args.employee_name,
     )
 
-    # Determine workbook to append into (if specified or present in Downloads)
-    target_append = None
+    # Determine workbook to append into (checks repository master first, then Downloads)
+    targets_to_update = []
     if args.append_to:
-        target_append = Path(args.append_to).expanduser()
+        targets_to_update.append(Path(args.append_to).expanduser())
     else:
+        repo_master = Path(args.vault_root).expanduser() / "NEW_Overtimes_Technology.xlsx"
+        if repo_master.exists():
+            targets_to_update.append(repo_master)
         downloads_master = Path.home() / "Downloads" / "NEW_Overtimes_Technology.xlsx"
-        if downloads_master.exists():
-            target_append = downloads_master
+        if downloads_master.exists() and downloads_master not in targets_to_update:
+            targets_to_update.append(downloads_master)
 
-    if target_append and target_append.exists():
-        append_to_existing_workbook(
-            target_append,
-            results,
-            start_date=start_date,
-            end_date=end_date,
-            employee_id=args.employee_id,
-            employee_name=args.employee_name,
-        )
+    for target in targets_to_update:
+        if target.exists():
+            append_to_existing_workbook(
+                target,
+                results,
+                start_date=start_date,
+                end_date=end_date,
+                employee_id=args.employee_id,
+                employee_name=args.employee_name,
+            )
 
     if not args.no_clipboard:
         stage_to_clipboard(
