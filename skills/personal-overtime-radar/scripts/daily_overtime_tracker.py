@@ -257,6 +257,7 @@ def get_wifi_telemetry_for_date(target_date: datetime.date) -> dict:
 def get_power_and_sleep_telemetry(target_date: datetime.date) -> dict:
     """
     Extract sleep, wake, and laptop lid-closed timestamps from pmset -g log.
+    Identifies realistic morning work start and evening finish timestamps.
     """
     res = {
         "morning_sign_on": None,
@@ -277,90 +278,43 @@ def get_power_and_sleep_telemetry(target_date: datetime.date) -> dict:
         lines = proc.stdout.splitlines()
 
         d_str = target_date.isoformat()
-        sleep_re = re.compile(
-            rf"^{d_str}\s+(\d{{2}}:\d{{2}}:\d{{2}})\s+([+-]\d{{4}})\s+Sleep\s+"
-        )
-        wake_re = re.compile(
-            rf"^{d_str}\s+(\d{{2}}:\d{{2}}:\d{{2}})\s+([+-]\d{{4}})\s+Wake\s+"
-        )
-        user_active_re = re.compile(
-            rf"^{d_str}\s+(\d{{2}}:\d{{2}}:\d{{2}})\s+([+-]\d{{4}})\s+Assertions.*UserIsActive"
-        )
-        ac_unplug_re = re.compile(
-            rf"^{d_str}\s+(\d{{2}}:\d{{2}}:\d{{2}})\s+([+-]\d{{4}}).*AC;\s*Using BATT"
-        )
-        lid_wake_re = re.compile(
-            rf"^{d_str}\s+(\d{{2}}:\d{{2}}:\d{{2}})\s+([+-]\d{{4}})\s+Wake.*lid"
-        )
-
-        morning_wakes = []
-        all_sleeps = []
-        user_activities = []
+        m_starts = []
+        e_events = []
         battery_switches = []
-        lid_wakes = []
 
         for line in lines:
             if not line.startswith(d_str):
                 continue
-            m_s = sleep_re.search(line)
-            if m_s:
-                t_str = m_s.group(1)
+            m = re.search(r"^\d{4}-\d{2}-\d{2}\s+(\d{2}:\d{2}:\d{2})", line)
+            if not m:
+                continue
+            t_str = m.group(1)
+            h = int(t_str[:2])
+            m_min = int(t_str[3:5])
+
+            # Morning work start: first active event between 06:30 and 11:30
+            if (h >= 7 or (h == 6 and m_min >= 30)) and h <= 11 and ("UserIsActive" in line or "Wake" in line):
                 t = datetime.datetime.strptime(t_str, "%H:%M:%S").time()
-                all_sleeps.append(t)
-            m_w = wake_re.search(line)
-            if m_w:
-                t_str = m_w.group(1)
+                m_starts.append(t)
+
+            # Evening finish: latest activity, sleep, or display assertion after 16:30
+            if (h >= 17 or (h == 16 and m_min >= 30)) and ("UserIsActive" in line or "Sleep" in line or "Display" in line):
                 t = datetime.datetime.strptime(t_str, "%H:%M:%S").time()
-                morning_wakes.append(t)
-            m_u = user_active_re.search(line)
-            if m_u:
-                t_str = m_u.group(1)
-                t = datetime.datetime.strptime(t_str, "%H:%M:%S").time()
-                user_activities.append(t)
-            m_b = ac_unplug_re.search(line)
-            if m_b:
-                t_str = m_b.group(1)
+                e_events.append(t)
+
+            if "Using BATT" in line and 16 <= h <= 20:
                 t = datetime.datetime.strptime(t_str, "%H:%M:%S").time()
                 battery_switches.append(t)
-            m_l = lid_wake_re.search(line)
-            if m_l:
-                t_str = m_l.group(1)
-                t = datetime.datetime.strptime(t_str, "%H:%M:%S").time()
-                lid_wakes.append(t)
 
-        if morning_wakes:
-            res["morning_sign_on"] = min(morning_wakes)
-        elif user_activities:
-            res["morning_sign_on"] = min(user_activities)
+        if m_starts:
+            res["morning_sign_on"] = min(m_starts)
+        if e_events:
+            res["evening_finish"] = max(e_events)
+            res["laptop_sleep"] = max(e_events)
+            res["last_activity"] = max(e_events)
 
-        # Final evening sleep
-        late_sleeps = [t for t in all_sleeps if t >= datetime.time(20, 0)]
-        if late_sleeps:
-            res["laptop_sleep"] = max(late_sleeps)
-        elif all_sleeps:
-            evening_sleeps = [t for t in all_sleeps if t >= datetime.time(17, 0)]
-            if evening_sleeps:
-                res["laptop_sleep"] = max(evening_sleeps)
-
-        # Afternoon departure from office (between 16:30 and 19:30)
-        dep_candidates = [t for t in all_sleeps if datetime.time(16, 30) <= t <= datetime.time(19, 30)]
-        if not dep_candidates and battery_switches:
-            dep_candidates = [t for t in battery_switches if datetime.time(16, 30) <= t <= datetime.time(19, 30)]
-        if dep_candidates:
-            res["evening_departure"] = min(dep_candidates)
-
-        # Evening arrival home / lid open after departure
-        if res["evening_departure"] and lid_wakes:
-            arrivals = [t for t in lid_wakes if t > res["evening_departure"]]
-            if arrivals:
-                res["evening_home_arrival"] = min(arrivals)
-        elif lid_wakes:
-            arrivals = [t for t in lid_wakes if t >= datetime.time(18, 0)]
-            if arrivals:
-                res["evening_home_arrival"] = min(arrivals)
-
-        if user_activities:
-            res["last_activity"] = max(user_activities)
+        if battery_switches:
+            res["evening_departure"] = min(battery_switches)
 
     except Exception:
         pass
@@ -571,62 +525,61 @@ def analyze_single_date(
     location = wifi["location"]
     net_proof = wifi["proof_detail"]
 
-    # Timestamps
-    sign_on = wifi["first_seen"] or power["morning_sign_on"] or datetime.time(9, 15, 0)
-    cutoff = datetime.time(17, 0, 0)
-    departure = power["evening_departure"] or wifi["last_office_seen"] or (datetime.time(18, 0, 0) if is_office else None)
-    laptop_sleep = power["laptop_sleep"] or power["last_activity"]
+    weekday = target_date.weekday()
+    # Contract rules: Mon-Thu 09:30-17:00 (7.5h), Fri 09:30-16:30 (7.0h), Weekend 0h
+    is_weekend = weekday in (5, 6)
+    if is_weekend:
+        cutoff_time = datetime.time(0, 0, 0)
+        contract_hours = 0.0
+    elif weekday == 4:  # Friday
+        cutoff_time = datetime.time(16, 30, 0)
+        contract_hours = 7.0
+    else:  # Monday - Thursday
+        cutoff_time = datetime.time(17, 0, 0)
+        contract_hours = 7.5
 
-    # Calculate active hours and overtime
-    raw_overtime = 0.0
-    policy = "Remote Option 2 (Active Evening Span)"
+    # Determine morning start (between 07:00 and 11:00)
+    morning_start = power["morning_sign_on"] or wifi["first_seen"] or datetime.time(9, 15, 0)
 
-    if is_office:
+    # Determine evening finish (latest sleep or user activity after cutoff)
+    evening_finish = power["laptop_sleep"] or power["last_activity"]
+    if not evening_finish:
+        evening_finish = cutoff_time
+
+    # Calculate Total Daily Working Hours (from morning sign-on to evening finish)
+    dt_morning = datetime.datetime.combine(target_date, morning_start)
+    dt_finish = datetime.datetime.combine(target_date, evening_finish)
+    total_working_seconds = max(0.0, (dt_finish - dt_morning).total_seconds())
+    total_working_hours = round(total_working_seconds / 3600.0, 2)
+
+    # Calculate Overtime (hours worked beyond contract cutoff)
+    dt_cutoff = datetime.datetime.combine(target_date, cutoff_time)
+    
+    if is_weekend:
+        policy = "Weekend Support"
+        raw_overtime = total_working_hours
+    elif is_office:
         policy = "In-Office Zero-Cut (On-site + Evening Home)"
-        # 1. On-site overtime past 17:00
-        dep_time = departure or datetime.time(18, 0, 0)
-        on_site_h = (
-            datetime.datetime.combine(target_date, dep_time)
-            - datetime.datetime.combine(target_date, cutoff)
-        ).total_seconds() / 3600.0
-        on_site_h = max(0.0, on_site_h)
-
-        # 2. Evening home session
-        home_h = 0.0
-        if laptop_sleep and laptop_sleep > datetime.time(18, 30):
-            evening_start = power.get("evening_home_arrival") or max(dep_time, datetime.time(18, 25))
-            home_h = (
-                datetime.datetime.combine(target_date, laptop_sleep)
-                - datetime.datetime.combine(target_date, evening_start)
-            ).total_seconds() / 3600.0
-            home_h = max(0.0, home_h)
-
-        raw_overtime = on_site_h + home_h
-    else:
-        # Remote day
-        if laptop_sleep and laptop_sleep > cutoff:
-            raw_overtime = (
-                datetime.datetime.combine(target_date, laptop_sleep)
-                - datetime.datetime.combine(target_date, cutoff)
-            ).total_seconds() / 3600.0
-            raw_overtime = max(0.0, raw_overtime)
-        elif meetings:
-            raw_overtime = 1.0  # Default conservative evening coordination
+        span_past_cutoff = max(0.0, (dt_finish - dt_cutoff).total_seconds() / 3600.0)
+        # If evening session extends into night at home past 18:30, deduct 45 min transit gap
+        if dt_finish.time() > datetime.time(18, 30) and span_past_cutoff > 1.5:
+            raw_overtime = max(0.0, span_past_cutoff - 0.75)
         else:
-            raw_overtime = 0.0
+            raw_overtime = span_past_cutoff
+    else:
+        # Remote Day: continuous active span past cutoff to night finish
+        policy = "Remote Continuous Evening Span"
+        raw_overtime = max(0.0, (dt_finish - dt_cutoff).total_seconds() / 3600.0)
 
     payroll_h = round_payroll_hours(raw_overtime, is_office=is_office)
 
-    # Total span string
-    end_time_str = laptop_sleep.strftime("%H:%M:%S") if laptop_sleep else (departure.strftime("%H:%M:%S") if departure else "17:00:00")
-    start_time_str = sign_on.strftime("%H:%M:%S") if sign_on else "09:15:00"
-    span_seconds = (
-        datetime.datetime.combine(target_date, datetime.datetime.strptime(end_time_str, "%H:%M:%S").time())
-        - datetime.datetime.combine(target_date, datetime.datetime.strptime(start_time_str, "%H:%M:%S").time())
-    ).total_seconds()
-    span_h = int(span_seconds // 3600)
-    span_m = int((span_seconds % 3600) // 60)
-    total_span_str = f"{start_time_str} - {end_time_str} ({span_h}h {span_m}m)"
+    # Format timestamps
+    start_str = morning_start.strftime("%H:%M:%S")
+    end_str = evening_finish.strftime("%H:%M:%S")
+    cutoff_str = cutoff_time.strftime("%H:%M:%S")
+    span_h = int(total_working_seconds // 3600)
+    span_m = int((total_working_seconds % 3600) // 60)
+    total_span_str = f"{start_str} - {end_str} ({span_h}h {span_m}m)"
 
     # Evidence strings
     mtg_str = f"{len(meetings)} meetings: {', '.join([m['title'] for m in meetings[:4]])}" if meetings else "None recorded"
@@ -637,9 +590,9 @@ def analyze_single_date(
     justification = synthesize_justification(meetings, chats, screenpipe["apps"], repos, is_office)
 
     proof_status = (
-        f"Verified (Office Gateway {wifi['gateway']} + Sleep {end_time_str})"
+        f"Verified (Office Gateway {wifi['gateway']} + Sleep {end_str})"
         if is_office
-        else f"Verified (Remote LAN + Sleep {end_time_str})"
+        else f"Verified (Remote LAN + Sleep {end_str})"
     )
 
     return {
@@ -648,10 +601,11 @@ def analyze_single_date(
         "location": location,
         "is_office": is_office,
         "net_proof": net_proof,
-        "sign_on": start_time_str,
-        "contract_cutoff": "17:00:00",
-        "departure": departure.strftime("%H:%M:%S") if departure else "N/A",
-        "laptop_sleep": laptop_sleep.strftime("%H:%M:%S") if laptop_sleep else "N/A",
+        "sign_on": start_str,
+        "cutoff_time": cutoff_str,
+        "evening_finish": end_str,
+        "total_working_hours": total_working_hours,
+        "contract_hours": contract_hours,
         "total_span": total_span_str,
         "raw_overtime": round(raw_overtime, 2),
         "payroll_hours": payroll_h,
@@ -682,40 +636,42 @@ def update_master_workbook(
 
     # --- 1. Update Telemetry_Evidence sheet ---
     evidence_sheet_name = "Telemetry_Evidence"
+    headers = [
+        "Date",
+        "Day",
+        "Location",
+        "Morning Sign-on",
+        "Evening Finish / Sleep",
+        "Total Daily Working Hours",
+        "Contract Baseline Hours",
+        "Cutoff Time",
+        "Raw Overtime Hours",
+        "Payroll Overtime Hours",
+        "Policy Applied",
+        "Network Proof",
+        "Transcripts & Agendas Analyzed",
+        "Teams Chats & Emails Analyzed",
+        "Primary Apps & Repos",
+        "Synthesized Justification",
+        "Proof Status",
+    ]
     if evidence_sheet_name not in wb.sheetnames:
         ws_ev = wb.create_sheet(title=evidence_sheet_name)
-        headers = [
-            "Date",
-            "Day",
-            "Location",
-            "Network Proof",
-            "Sign-on Timestamp",
-            "Contract Cutoff",
-            "Sign-off / Departure",
-            "Laptop Closed / Sleep",
-            "Total Active Span",
-            "Raw Overtime Hours",
-            "Payroll Overtime Hours",
-            "Policy Applied",
-            "Transcripts & Agendas Analyzed",
-            "Teams Chats & Emails Analyzed",
-            "Primary Apps & Repos",
-            "Synthesized Justification",
-            "Proof Status",
-        ]
         ws_ev.append(headers)
-
-        header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-        header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
-        for col_idx in range(1, len(headers) + 1):
-            cell = ws_ev.cell(row=1, column=col_idx)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        ws_ev.row_dimensions[1].height = 28
         ws_ev.freeze_panes = "A2"
     else:
         ws_ev = wb[evidence_sheet_name]
+        for col_idx, h in enumerate(headers, start=1):
+            ws_ev.cell(row=1, column=col_idx, value=h)
+
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+    for col_idx in range(1, len(headers) + 1):
+        cell = ws_ev.cell(row=1, column=col_idx)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ws_ev.row_dimensions[1].height = 28
 
     # Map existing dates in Telemetry_Evidence to avoid duplicates
     existing_ev_dates = {}
@@ -740,15 +696,15 @@ def update_master_workbook(
             d_val,
             data["day"],
             data["location"],
-            data["net_proof"],
             data["sign_on"],
-            data["contract_cutoff"],
-            data["departure"],
-            data["laptop_sleep"],
-            data["total_span"],
+            data["evening_finish"],
+            data["total_working_hours"],
+            data["contract_hours"],
+            data["cutoff_time"],
             data["raw_overtime"],
             data["payroll_hours"],
             data["policy"],
+            data["net_proof"],
             data["meetings_analyzed"],
             data["chats_analyzed"],
             data["primary_apps"],
@@ -767,7 +723,7 @@ def update_master_workbook(
             cell.border = thin_border
             if c_idx == 1:
                 cell.number_format = "yyyy-mm-dd"
-            elif c_idx in (10, 11):
+            elif c_idx in (6, 7, 9, 10):
                 cell.number_format = "0.0"
 
     # Auto-adjust column widths in Telemetry_Evidence
@@ -790,9 +746,19 @@ def update_master_workbook(
     for r in range(3, ws2.max_row + 1):
         sn = ws2.cell(row=r, column=1).value
         dt = ws2.cell(row=r, column=3).value
-        if (sn == employee_id or sn is None) and dt:
+        if sn == employee_id and dt:
             d_val = dt.date() if isinstance(dt, datetime.datetime) else dt
-            existing_s2_dates[d_val] = r
+            if d_val not in existing_s2_dates:
+                existing_s2_dates[d_val] = r
+            else:
+                # Clear duplicate row
+                formula = f'=IF(C{r}<>0,CHOOSE(WEEKDAY(C{r},1),"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")," ")'
+                ws2.cell(row=r, column=1, value=None)
+                ws2.cell(row=r, column=2, value=None)
+                ws2.cell(row=r, column=3, value=None)
+                ws2.cell(row=r, column=4, value=formula)
+                ws2.cell(row=r, column=5, value=None)
+                ws2.cell(row=r, column=6, value=None)
 
     # Determine first append row: right after the last filled row for Panagiotis
     last_filled_r = 3
@@ -909,7 +875,8 @@ def main():
         res = analyze_single_date(curr, args.vault_root, args.screenpipe_db, DEFAULT_REPOS)
         analyzed_days.append(res)
         print(f"    -> Location: {res['location']}")
-        print(f"    -> Timestamps: Sign-on {res['sign_on']}, Sleep {res['laptop_sleep']}")
+        print(f"    -> Timestamps: Sign-on {res['sign_on']}, Finish/Sleep {res['evening_finish']}")
+        print(f"    -> Gross Work: {res['total_working_hours']}h (Contract Baseline: {res['contract_hours']}h)")
         print(f"    -> Overtime: Raw {res['raw_overtime']}h -> Payroll {res['payroll_hours']}h ({res['policy']})")
         print(f"    -> Justification: {res['justification']}")
         curr += datetime.timedelta(days=1)

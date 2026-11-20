@@ -583,7 +583,21 @@ def process_daily_overtime(
     # Ensure days with evening sleeps or office presence are not omitted even if Screenpipe had 0 entries
     if evening_sleeps:
         for s_date, s_dt in evening_sleeps.items():
-            if s_date not in days and s_date in office_days:
+            if s_date in office_days:
+                weekday = s_date.weekday()
+                cutoff_t = datetime.time(16, 30, 0) if weekday == 4 else datetime.time(17, 0, 0)
+                has_after_hours = False
+                if s_date in days:
+                    has_after_hours = any(it["end"].time() > cutoff_t for it in days[s_date])
+                if not has_after_hours and s_dt.time() > cutoff_t:
+                    days.setdefault(s_date, []).append({
+                        "start": max(s_dt - datetime.timedelta(hours=3), datetime.datetime.combine(s_date, cutoff_t, tzinfo=s_dt.tzinfo)),
+                        "end": s_dt,
+                        "duration": 3.0 * 3600.0,
+                        "app": "office_presence",
+                        "title": "office presence session",
+                    })
+            elif s_date not in days:
                 days[s_date] = [{
                     "start": s_dt - datetime.timedelta(hours=3),
                     "end": s_dt,
