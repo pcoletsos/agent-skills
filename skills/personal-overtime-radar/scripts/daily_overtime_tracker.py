@@ -794,10 +794,47 @@ def update_master_workbook(
         c_h = ws2.cell(row=target_r, column=5, value=data["payroll_hours"])
         c_h.font = font_s2
         c_h.number_format = "0.0"
-        ws2.cell(row=target_r, column=6, value=data["justification"]).font = font_s2
+        c_h.alignment = Alignment(horizontal="center")
 
-        for c_idx in range(1, 7):
+        actual_ot = round(data["total_working_hours"] - data["contract_hours"], 2)
+
+        # Check if Sheet2 has explicit Actual Overtime and Total Daily Working Hours columns (8-column format)
+        if ws2.cell(row=2, column=6).value and "Actual" in str(ws2.cell(row=2, column=6).value):
+            c_act = ws2.cell(row=target_r, column=6, value=actual_ot)
+            c_act.font = Font(name="Aptos Narrow", size=11, bold=True, color="1F4E78")
+            c_act.number_format = "0.0"
+            c_act.alignment = Alignment(horizontal="center")
+
+            c_tot = ws2.cell(row=target_r, column=7, value=data["total_working_hours"])
+            c_tot.font = font_s2
+            c_tot.number_format = "0.0"
+            c_tot.alignment = Alignment(horizontal="center")
+
+            ws2.cell(row=target_r, column=8, value=data["justification"]).font = font_s2
+            max_col_s2 = 8
+        else:
+            ws2.cell(row=target_r, column=6, value=data["justification"]).font = font_s2
+            max_col_s2 = 6
+
+        for c_idx in range(1, max_col_s2 + 1):
             ws2.cell(row=target_r, column=c_idx).border = thin_border
+
+        # Also update HR_Submission_6Col if present
+        if "HR_Submission_6Col" in wb.sheetnames:
+            ws_hr = wb["HR_Submission_6Col"]
+            ws_hr.cell(row=target_r, column=1, value=employee_id).font = font_s2
+            ws_hr.cell(row=target_r, column=2, value=employee_name).font = font_s2
+            c_hr_d = ws_hr.cell(row=target_r, column=3, value=d_val)
+            c_hr_d.font = font_s2
+            c_hr_d.number_format = "mm-dd-yy"
+            ws_hr.cell(row=target_r, column=4, value=formula).font = font_formula
+            c_hr_h = ws_hr.cell(row=target_r, column=5, value=data["payroll_hours"])
+            c_hr_h.font = font_s2
+            c_hr_h.number_format = "0.0"
+            c_hr_h.alignment = Alignment(horizontal="center")
+            ws_hr.cell(row=target_r, column=6, value=data["justification"]).font = font_s2
+            for c_idx in range(1, 7):
+                ws_hr.cell(row=target_r, column=c_idx).border = thin_border
 
         added_to_sheet2 += 1
 
