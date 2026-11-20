@@ -634,35 +634,34 @@ def update_master_workbook(
 
     wb = openpyxl.load_workbook(str(wb_path))
 
-    # --- 1. Update Telemetry_Evidence sheet ---
-    evidence_sheet_name = "Telemetry_Evidence"
+    # --- 1. Update Daily Overtime Details / Telemetry sheet ---
+    evidence_sheet_name = "Daily Overtime Details" if "Daily Overtime Details" in wb.sheetnames else "Telemetry_Evidence"
     headers = [
+        "Item #",
         "Date",
-        "Day",
+        "Day of Week",
+        "Month",
         "Location",
         "Morning Sign-on",
         "Evening Finish / Sleep",
         "Total Daily Working Hours",
         "Contract Baseline Hours",
-        "Cutoff Time",
-        "Raw Overtime Hours",
-        "Payroll Overtime Hours",
+        "Actual Overtime Hours",
+        "Hours of Extra Work (Payroll)",
+        "Unclaimed Overtime Delta",
         "Policy Applied",
-        "Network Proof",
-        "Transcripts & Agendas Analyzed",
-        "Teams Chats & Emails Analyzed",
-        "Primary Apps & Repos",
-        "Synthesized Justification",
-        "Proof Status",
+        "Key Deliverables & Justification",
+        "Network Proof / Wi-Fi Gateway",
+        "Analyzed Meetings & Agendas",
+        "Primary Repos & Tools",
+        "Verification Status",
     ]
     if evidence_sheet_name not in wb.sheetnames:
         ws_ev = wb.create_sheet(title=evidence_sheet_name)
         ws_ev.append(headers)
-        ws_ev.freeze_panes = "A2"
+        ws_ev.freeze_panes = "C2"
     else:
         ws_ev = wb[evidence_sheet_name]
-        for col_idx, h in enumerate(headers, start=1):
-            ws_ev.cell(row=1, column=col_idx, value=h)
 
     header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
@@ -673,15 +672,15 @@ def update_master_workbook(
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     ws_ev.row_dimensions[1].height = 28
 
-    # Map existing dates in Telemetry_Evidence to avoid duplicates
+    # Map existing dates in Daily Overtime Details to avoid duplicates
     existing_ev_dates = {}
     for r in range(2, ws_ev.max_row + 1):
-        v = ws_ev.cell(row=r, column=1).value
+        v = ws_ev.cell(row=r, column=2).value
         if v:
             d_val = v.date() if isinstance(v, datetime.datetime) else v
             existing_ev_dates[d_val] = r
 
-    font_data = Font(name="Calibri", size=10)
+    font_data = Font(name="Calibri", size=11)
     thin_border = Border(
         left=Side(style="thin", color="D1D5DB"),
         right=Side(style="thin", color="D1D5DB"),
@@ -692,51 +691,53 @@ def update_master_workbook(
     for data in analyzed_days:
         d = data["date"]
         d_val = datetime.datetime.combine(d, datetime.time.min)
+        act_ot = round(data["total_working_hours"] - data["contract_hours"], 2)
+        unclaimed_d = round(act_ot - data["payroll_hours"], 2)
+
+        if d in existing_ev_dates:
+            target_r = existing_ev_dates[d]
+            item_num = ws_ev.cell(row=target_r, column=1).value or (target_r - 1)
+        else:
+            target_r = ws_ev.max_row + 1
+            item_num = target_r - 1
+
         row_values = [
+            item_num,
             d_val,
             data["day"],
+            d.strftime("%B %Y"),
             data["location"],
             data["sign_on"],
             data["evening_finish"],
             data["total_working_hours"],
             data["contract_hours"],
-            data["cutoff_time"],
-            data["raw_overtime"],
+            act_ot,
             data["payroll_hours"],
+            unclaimed_d,
             data["policy"],
+            data["justification"],
             data["net_proof"],
             data["meetings_analyzed"],
-            data["chats_analyzed"],
             data["primary_apps"],
-            data["justification"],
             data["proof_status"],
         ]
-
-        if d in existing_ev_dates:
-            target_r = existing_ev_dates[d]
-        else:
-            target_r = ws_ev.max_row + 1
 
         for c_idx, val in enumerate(row_values, start=1):
             cell = ws_ev.cell(row=target_r, column=c_idx, value=val)
             cell.font = font_data
             cell.border = thin_border
-            if c_idx == 1:
+            if c_idx == 2:
                 cell.number_format = "yyyy-mm-dd"
-            elif c_idx in (6, 7, 9, 10):
-                cell.number_format = "0.0"
+                cell.alignment = Alignment(horizontal="center")
+            elif c_idx in (8, 9, 10, 11, 12):
+                cell.number_format = "#,##0.0"
+                cell.alignment = Alignment(horizontal="right")
+            elif c_idx in (1, 3, 4, 5, 6, 7):
+                cell.alignment = Alignment(horizontal="center")
+            else:
+                cell.alignment = Alignment(horizontal="left")
 
-    # Auto-adjust column widths in Telemetry_Evidence
-    for col in ws_ev.columns:
-        col_letter = get_column_letter(col[0].column)
-        max_len = 0
-        for cell in col:
-            v_str = str(cell.value or "")
-            if len(v_str) > max_len:
-                max_len = len(v_str)
-        ws_ev.column_dimensions[col_letter].width = min(max(max_len + 3, 12), 45)
-
-    # --- 2. Update Sheet2 (Clean, strictly 6 columns) ---
+    # --- 2. Update Sheet2 (Strictly Clean & Unaltered 6 HR Columns) ---
     ws2 = wb["Sheet2"] if "Sheet2" in wb.sheetnames else wb.sheetnames[0]
     font_s2 = Font(name="Aptos Narrow", size=11)
     font_formula = Font(name="Calibri", size=11)
@@ -753,12 +754,8 @@ def update_master_workbook(
             else:
                 # Clear duplicate row
                 formula = f'=IF(C{r}<>0,CHOOSE(WEEKDAY(C{r},1),"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")," ")'
-                ws2.cell(row=r, column=1, value=None)
-                ws2.cell(row=r, column=2, value=None)
-                ws2.cell(row=r, column=3, value=None)
-                ws2.cell(row=r, column=4, value=formula)
-                ws2.cell(row=r, column=5, value=None)
-                ws2.cell(row=r, column=6, value=None)
+                for col_c in range(1, 7):
+                    ws2.cell(row=r, column=col_c, value=formula if col_c == 4 else None)
 
     # Determine first append row: right after the last filled row for Panagiotis
     last_filled_r = 3
@@ -770,7 +767,6 @@ def update_master_workbook(
 
     added_to_sheet2 = 0
     for data in analyzed_days:
-        # Only add to Sheet2 if overtime hours > 0
         if data["payroll_hours"] <= 0:
             continue
 
@@ -795,68 +791,18 @@ def update_master_workbook(
         c_h.font = font_s2
         c_h.number_format = "0.0"
         c_h.alignment = Alignment(horizontal="center")
+        ws2.cell(row=target_r, column=6, value=data["justification"]).font = font_s2
 
-        actual_ot = round(data["total_working_hours"] - data["contract_hours"], 2)
-
-        # Check if Sheet2 has explicit Actual Overtime and Total Daily Working Hours columns (8-column format)
-        if ws2.cell(row=2, column=6).value and "Actual" in str(ws2.cell(row=2, column=6).value):
-            c_act = ws2.cell(row=target_r, column=6, value=actual_ot)
-            c_act.font = Font(name="Aptos Narrow", size=11, bold=True, color="1F4E78")
-            c_act.number_format = "0.0"
-            c_act.alignment = Alignment(horizontal="center")
-
-            c_tot = ws2.cell(row=target_r, column=7, value=data["total_working_hours"])
-            c_tot.font = font_s2
-            c_tot.number_format = "0.0"
-            c_tot.alignment = Alignment(horizontal="center")
-
-            ws2.cell(row=target_r, column=8, value=data["justification"]).font = font_s2
-            max_col_s2 = 8
-        else:
-            ws2.cell(row=target_r, column=6, value=data["justification"]).font = font_s2
-            max_col_s2 = 6
-
-        for c_idx in range(1, max_col_s2 + 1):
+        for c_idx in range(1, 7):
             ws2.cell(row=target_r, column=c_idx).border = thin_border
-
-        # Also update HR_Submission_6Col if present
-        if "HR_Submission_6Col" in wb.sheetnames:
-            ws_hr = wb["HR_Submission_6Col"]
-            ws_hr.cell(row=target_r, column=1, value=employee_id).font = font_s2
-            ws_hr.cell(row=target_r, column=2, value=employee_name).font = font_s2
-            c_hr_d = ws_hr.cell(row=target_r, column=3, value=d_val)
-            c_hr_d.font = font_s2
-            c_hr_d.number_format = "mm-dd-yy"
-            ws_hr.cell(row=target_r, column=4, value=formula).font = font_formula
-            c_hr_h = ws_hr.cell(row=target_r, column=5, value=data["payroll_hours"])
-            c_hr_h.font = font_s2
-            c_hr_h.number_format = "0.0"
-            c_hr_h.alignment = Alignment(horizontal="center")
-            ws_hr.cell(row=target_r, column=6, value=data["justification"]).font = font_s2
-            for c_idx in range(1, 7):
-                ws_hr.cell(row=target_r, column=c_idx).border = thin_border
 
         added_to_sheet2 += 1
 
     wb.save(str(wb_path))
     print(f"Master workbook updated successfully: {wb_path}")
-    print(f"  - Telemetry_Evidence: {len(analyzed_days)} rows recorded")
+    print(f"  - {evidence_sheet_name}: {len(analyzed_days)} rows recorded")
     print(f"  - Sheet2: {added_to_sheet2} overtime claims updated")
     print(f"  - Backup saved at: {backup_path}")
-
-    # Mirror changes across repo and Downloads copies so user always sees updates
-    mirror_targets = [
-        DEFAULT_MASTER_XLSX,
-        FALLBACK_DOWNLOADS_XLSX,
-        FALLBACK_DOWNLOADS_XLSX_ALT,
-    ]
-    for target in mirror_targets:
-        try:
-            if target.resolve() != wb_path.resolve() and (target.exists() or "Downloads" in str(target)):
-                shutil.copy2(wb_path, target)
-                print(f"  - Synchronized copy to: {target}")
-        except Exception as e:
-            print(f"  - Note: could not sync to {target}: {e}")
 
     return wb_path
 
