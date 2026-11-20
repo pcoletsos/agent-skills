@@ -1,7 +1,7 @@
 ---
 name: personal-overtime-radar
 description: Audit, calculate, and reconcile personal engineering and architecture overtime across local macOS telemetry, Screenpipe activity intervals, power logs, Git commits, network presence, and calendar feeds.
-version: 0.2.1
+version: 0.3.0
 status: draft
 ---
 
@@ -72,6 +72,15 @@ Perform an end-to-end audit, forensic reconciliation, and payroll-ready formatti
      - Synchronizes/merges the audited month chronologically starting at the employee's block.
      - Preserves all earlier months (e.g. September) and earlier manual entries without data loss.
    - Load the tab-delimited (TSV) rows directly into the macOS system clipboard using `pbcopy` matching all 6 columns (`SN\tName\tDate\tDay\tHours of Extra Work\tJustification`) so the user can paste directly into SharePoint in one keystroke (`Cmd+V`).
+
+6. **Daily Incremental Gap Analysis & Master Workbook Synchronization (`daily_overtime_tracker.py`)**:
+   - Automatically detects gaps between the last recorded date in `NEW_Overtimes_Technology.xlsx` (in `snappi-2-brain`) and yesterday.
+   - For single-day runs, analyzes yesterday's work; if 2 to 3 days are unrecorded, automatically catches up the full missing span.
+   - Grounded in multi-layered telemetry: Wi-Fi gateway logs (`/var/log/wifi.log*`), `pmset -g log`, meeting ledger cards (`05_MEETINGS/ledger/`), Screenpipe audio/OCR, and active Teams chats/commits.
+   - Maintains two cleanly separated areas in the master workbook:
+     - `Sheet2`: strictly 6 columns, noise-free, formatted with Excel Day formulas matching Valia's template.
+     - `Telemetry_Evidence`: dedicated 17-column forensic audit sheet tracking Date, Day, Location, Network Proof (SSID/Gateway), Sign-on, Contract Cutoff (17:00), Sign-off/Departure, Laptop Closed/Sleep, Total Active Span, Raw Hours, Payroll Hours, Policy Applied, Meetings Analyzed, Teams Chats Analyzed, Primary Apps, Justification, and Proof Status.
+   - Automatically stages new rows into macOS clipboard (`pbcopy`) as clean TSV.
 
 ## Output Format
 Render the audit findings using this structured markdown layout:

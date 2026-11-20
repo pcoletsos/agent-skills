@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0 - 2026-11-20
+
+- **Source Task**: Daily incremental overtime gap analysis and isolated multi-column telemetry evidence sheet.
+- **Reason for Change**: Support daily automated runs that analyze missing days (single day or weekend backlogs) while keeping the reporting sheet strictly noise-free matching company template, and storing comprehensive forensic proof on a separate sheet.
+- **Summary of Change**:
+  - Implemented `daily_overtime_tracker.py` with automatic gap detection scanning `NEW_Overtimes_Technology.xlsx` up to yesterday.
+  - Added isolated `Telemetry_Evidence` sheet with 17 forensic audit columns: Date, Day, Location, Network Proof (Wi-Fi SSID/Gateway), Sign-on timestamp, Contract cutoff (17:00), Sign-off/Departure timestamp, Laptop closed/sleep timestamp, Total active span, Raw overtime hours, Payroll overtime hours, Policy applied, Transcripts and agendas analyzed, Teams chats and emails analyzed, Primary apps and repos, Synthesized justification, and Proof status.
+  - Kept `Sheet2` strictly clean with 6 columns, dynamic Day formula (`=IF(C{r}<>0,CHOOSE(WEEKDAY(C{r},1),"Sunday", ...))`), Aptos Narrow font, and thin borders.
+  - Added power and lid sleep tracking from `pmset -g log` to extract exact evening departure and arrival home timestamps.
+  - Integrated meeting ledger cards (`05_MEETINGS/ledger/`) and live Teams/email feeds for practitioner justification synthesis.
+- **Expected Behavior Change**: Daily scheduled automation can run unattended, identify missing days, compute accurate overtime with full forensic backing, and update both the clean reporting sheet and the detailed audit sheet.
+- **Risk**: Low. Safe `.bak` backup created prior to workbook mutation; dry-run mode available.
+
 ## 0.2.1 - 2026-11-19
 
 - **Source Task**: Align deliverable workbook and clipboard staging with company master template (`NEW_Overtimes_Technology.xlsx`).
